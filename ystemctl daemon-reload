@@ -1,0 +1,18 @@
+[0;1;32m●[0m melodia-recorder.service - Radio Melodia Recorder
+     Loaded: [0;1;31mbad-setting[0m (Reason: Unit melodia-recorder.service has a bad unit file setting.)
+     Active: [0;1;32mactive (running)[0m since Mon 2026-02-23 13:58:51 -05; 1h 40min ago
+   Main PID: 154158 (ffmpeg)
+        CPU: 30.220s
+     CGroup: /system.slice/melodia-recorder.service
+             └─154158 /usr/bin/ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 -rw_timeout 15000000 -i https://stream.radiomelodia.com.pe:8000/radio.mp3 -c copy -f segment -segment_time 20 -segment_format mp3 -strftime 1 /recordings/melodia/%Y-%m-%d_%H-%M-%S.mp3
+
+Feb 23 15:37:08 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:37:28 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:37:48 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:38:09 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:38:28 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:38:48 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:39:08 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:39:28 vps.abogadosyasociados.net.pe ffmpeg[154158]: [2.0K blob data]
+Feb 23 15:39:39 vps.abogadosyasociados.net.pe systemd[1]: [0;1;31m[0;1;39m[0;1;31m/etc/systemd/system/melodia-recorder.service:21: Failed to resolve unit specifiers in /home/miguel/web/api.abogadosyasociados.net.pe/public_html/storage/recordings/melodia/%Y-%m-%d_%H-%M-%S.mp3: Invalid slot[0m
+Feb 23 15:39:39 vps.abogadosyasociados.net.pe systemd[1]: [0;1;39m[0;1;31m[0;1;39mmelodia-recorder.service: Unit configuration has fatal error, unit will not be started.[0m
