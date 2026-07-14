@@ -15,4 +15,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('/play', [RadioController::class, 'play'])->name('api.play');
     Route::post('/cut', [RadioController::class, 'cut'])->name('api.cut');
     Route::post('/export', [RadioController::class, 'export'])->name('api.export');
+    Route::post('/exports', [RadioController::class, 'createExportJob'])->name('api.exports.create');
+    Route::get('/exports/{id}', [RadioController::class, 'exportJobStatus'])
+        ->where('id', '[a-f0-9]{32}')
+        ->name('api.exports.status');
+    Route::get('/exports/{id}/download', [RadioController::class, 'downloadExportJob'])
+        ->where('id', '[a-f0-9]{32}')
+        ->name('api.exports.download');
 });

@@ -1,0 +1,19 @@
+[Unit]
+Description=Radio Melodia temporary audio export worker
+After=network.target
+
+[Service]
+Type=simple
+User=josemiguelo
+Group=www-data
+WorkingDirectory=/home/josemiguelo/web/melodiagrabaciones.abogadosyasociados.net.pe/public_html/melodia-radio-backend
+ExecStart=/usr/bin/php -d disable_functions=exec,system,passthru,shell_exec,popen artisan radio:work-exports --sleep=2
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

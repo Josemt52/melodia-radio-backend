@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\RadioRecordingService;
+use App\Services\ExportJobService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -11,7 +12,10 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class RadioController extends Controller
 {
-    public function __construct(private RadioRecordingService $recordings) {}
+    public function __construct(
+        private RadioRecordingService $recordings,
+        private ExportJobService $exportJobs
+    ) {}
 
     public function list(Request $request)
     {
@@ -84,6 +88,59 @@ class RadioController extends Controller
         return $this->downloadExport($request, $request->input('ranges', []));
     }
 
+    public function createExportJob(Request $request)
+    {
+        $this->ensureAdmin($request);
+        $ranges = $request->input('ranges', []);
+
+        if (!is_array($ranges)) {
+            return response()->json(['error' => 'Los fragmentos no son validos.'], 422);
+        }
+
+        try {
+            $job = $this->exportJobs->create(
+                (int) $request->user()->id,
+                $ranges,
+                (string) $request->input('format', 'mp3')
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 422);
+        }
+
+        return response()->json($job, 202, ['Cache-Control' => 'no-store']);
+    }
+
+    public function exportJobStatus(Request $request, string $id)
+    {
+        $this->ensureAdmin($request);
+
+        try {
+            $job = $this->exportJobs->status($id, (int) $request->user()->id);
+        } catch (\DomainException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 404);
+        }
+
+        return response()->json($job, 200, ['Cache-Control' => 'no-store']);
+    }
+
+    public function downloadExportJob(Request $request, string $id)
+    {
+        $this->ensureAdmin($request);
+
+        try {
+            $job = $this->exportJobs->completedJob($id, (int) $request->user()->id);
+        } catch (\DomainException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 409);
+        }
+
+        app()->terminating(fn () => $this->exportJobs->forget($id));
+
+        return response()->download($job['path'], $job['filename'], [
+            'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
+        ])->deleteFileAfterSend(true);
+    }
+
     private function ensureAdmin(Request $request): void
     {
         $user = $request->user();
@@ -134,10 +191,10 @@ class RadioController extends Controller
         } catch (\RuntimeException $exception) {
             Log::error('FFmpeg failed while exporting audio', ['error' => $exception->getMessage()]);
 
-            return response()->json([
+            return response()->json(array_filter([
                 'error' => 'No se pudo procesar el audio.',
-                'details' => $exception->getMessage(),
-            ], 500);
+                'details' => config('app.debug') ? $exception->getMessage() : null,
+            ]), 500);
         }
 
         $filename = 'melodia_' . now()->format('Y-m-d_H-i-s') . '.' . $format;

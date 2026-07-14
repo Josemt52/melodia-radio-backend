@@ -10,5 +10,6 @@ return [
     'ffmpeg_timeout' => (int) env('RADIO_FFMPEG_TIMEOUT', 600),
     'ffmpeg_binary' => env('RADIO_FFMPEG_BINARY', 'ffmpeg'),
     'ffprobe_binary' => env('RADIO_FFPROBE_BINARY', 'ffprobe'),
+    'export_job_ttl_seconds' => (int) env('RADIO_EXPORT_JOB_TTL_SECONDS', 21600),
     'admin_email' => env('ADMIN_EMAIL'),
 ];

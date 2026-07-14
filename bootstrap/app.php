@@ -13,6 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         \App\Console\Commands\CreatePanelUser::class,
+        \App\Console\Commands\ProcessAudioExports::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         //

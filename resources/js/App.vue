@@ -99,7 +99,33 @@ async function errorMessage(exception, fallback) {
         }
     }
 
-    return data?.details || data?.error || data?.message || fallback;
+    return data?.details || data?.error || data?.message || exception.message || fallback;
+}
+
+const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+async function processExport(ranges, format) {
+    const created = await api.post('/exports', { ranges, format });
+    const jobId = created.data.id;
+
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+        await wait(3000);
+        const response = await api.get(`/exports/${jobId}`);
+
+        if (response.data.status === 'completed') {
+            return jobId;
+        }
+
+        if (response.data.status === 'failed') {
+            throw new Error(response.data.error || 'No se pudo procesar el audio.');
+        }
+    }
+
+    throw new Error('La exportacion esta tomando mas tiempo del esperado.');
+}
+
+async function downloadJob(jobId) {
+    return api.get(`/exports/${jobId}/download`, { responseType: 'blob' });
 }
 
 async function login() {
@@ -182,10 +208,9 @@ async function loadPreview() {
     revokePreview();
 
     try {
-        const response = await api.post('/export', {
-            ranges: [{ date: date.value, start: start.value, end: end.value }],
-            format: 'mp3',
-        }, { responseType: 'blob' });
+        const ranges = [{ date: date.value, start: start.value, end: end.value }];
+        const jobId = await processExport(ranges, 'mp3');
+        const response = await downloadJob(jobId);
         previewBaseSeconds.value = secondsFromTime(start.value);
         previewUrl.value = URL.createObjectURL(response.data);
         await nextTick();
@@ -235,14 +260,13 @@ async function downloadExport() {
     notice.value = '';
 
     try {
-        const response = await api.post('/export', {
-            ranges: clips.value.map(({ date: clipDate, start: clipStart, end: clipEnd }) => ({
+        const ranges = clips.value.map(({ date: clipDate, start: clipStart, end: clipEnd }) => ({
                 date: clipDate,
                 start: clipStart,
                 end: clipEnd,
-            })),
-            format: outputFormat.value,
-        }, { responseType: 'blob' });
+            }));
+        const jobId = await processExport(ranges, outputFormat.value);
+        const response = await downloadJob(jobId);
         const url = URL.createObjectURL(response.data);
         const anchor = document.createElement('a');
         anchor.href = url;

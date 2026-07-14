@@ -137,7 +137,12 @@ class RadioRecordingService
 
             $outputFile = $this->cutsPath . DIRECTORY_SEPARATOR
                 . 'melodia_' . now()->format('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $format;
-            $this->joinClips($clips, $outputFile, $format, $workspace);
+
+            if ($format === 'mp3' && count($clips) === 1) {
+                File::move($clips[0], $outputFile);
+            } else {
+                $this->joinClips($clips, $outputFile, $format, $workspace);
+            }
 
             return $outputFile;
         } catch (\Throwable $exception) {
@@ -165,6 +170,10 @@ class RadioRecordingService
         }
 
         foreach (File::directories($this->cutsPath) as $directory) {
+            if (basename($directory) === 'jobs') {
+                continue;
+            }
+
             if ($now - File::lastModified($directory) > $olderThanSeconds) {
                 File::deleteDirectory($directory);
             }
@@ -316,8 +325,7 @@ class RadioRecordingService
             '-i', $concatPath,
             '-ss', (string) $offsetSeconds,
             '-t', (string) $durationSeconds,
-            '-c:a', 'libmp3lame',
-            '-b:a', '192k',
+            '-c:a', 'copy',
             $outputFile,
         ]);
         $process->setTimeout((int) config('radio.ffmpeg_timeout', 600));
@@ -337,7 +345,7 @@ class RadioRecordingService
 
         $codecArguments = $format === 'wav'
             ? ['-c:a', 'pcm_s16le']
-            : ['-c:a', 'libmp3lame', '-b:a', '192k'];
+            : ['-c:a', 'copy'];
 
         $process = new Process(array_merge([
             (string) config('radio.ffmpeg_binary', 'ffmpeg'), '-y', '-f', 'concat', '-safe', '0', '-i', $concatPath, '-vn',
