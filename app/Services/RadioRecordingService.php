@@ -15,6 +15,8 @@ class RadioRecordingService
     private string $cutsPath;
     private int $segmentSeconds;
     private int $readyFileAgeSeconds;
+    private string $recordingsTimezone;
+    private string $displayTimezone;
 
     public function __construct()
     {
@@ -22,6 +24,8 @@ class RadioRecordingService
         $this->cutsPath = rtrim(config('radio.cuts_path'), DIRECTORY_SEPARATOR);
         $this->segmentSeconds = max(1, (int) config('radio.segment_seconds', 10));
         $this->readyFileAgeSeconds = max(0, (int) config('radio.ready_file_age_seconds', 12));
+        $this->recordingsTimezone = (string) config('radio.recordings_timezone', 'UTC');
+        $this->displayTimezone = (string) config('app.timezone', 'UTC');
 
         if (!File::exists($this->cutsPath)) {
             File::makeDirectory($this->cutsPath, 0755, true);
@@ -204,13 +208,26 @@ class RadioRecordingService
 
     private function filesForDate(string $date): Collection
     {
-        $datePath = $this->recordingsPath . DIRECTORY_SEPARATOR . $date;
+        $localStart = CarbonImmutable::createFromFormat(
+            'Y-m-d H:i:s',
+            "$date 00:00:00",
+            $this->displayTimezone
+        );
+        $localEnd = $localStart->endOfDay();
+        $sourceDate = $localStart->setTimezone($this->recordingsTimezone)->startOfDay();
+        $lastSourceDate = $localEnd->setTimezone($this->recordingsTimezone)->startOfDay();
+        $files = collect(File::files($this->recordingsPath));
 
-        if (File::isDirectory($datePath)) {
-            return collect(File::allFiles($datePath));
+        while ($sourceDate->lessThanOrEqualTo($lastSourceDate)) {
+            $datePath = $this->recordingsPath . DIRECTORY_SEPARATOR . $sourceDate->format('Y-m-d');
+            if (File::isDirectory($datePath)) {
+                $files = $files->concat(File::allFiles($datePath));
+            }
+
+            $sourceDate = $sourceDate->addDay();
         }
 
-        return collect(File::allFiles($this->recordingsPath));
+        return $files;
     }
 
     private function isReadyFile(string $path): bool
@@ -245,11 +262,11 @@ class RadioRecordingService
     private function timestampFromRelativePath(string $relativePath): ?CarbonImmutable
     {
         if (preg_match('#^(\d{4}-\d{2}-\d{2})/(\d{2})/(\d{2})-(\d{2})\.mp3$#', $relativePath, $matches)) {
-            return CarbonImmutable::createFromFormat('Y-m-d H:i:s', "{$matches[1]} {$matches[2]}:{$matches[3]}:{$matches[4]}");
+            return $this->recordingTimestamp("{$matches[1]} {$matches[2]}:{$matches[3]}:{$matches[4]}");
         }
 
         if (preg_match('/^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})\.mp3$/', basename($relativePath), $matches)) {
-            return CarbonImmutable::createFromFormat('Y-m-d H:i:s', "{$matches[1]} {$matches[2]}:{$matches[3]}:{$matches[4]}");
+            return $this->recordingTimestamp("{$matches[1]} {$matches[2]}:{$matches[3]}:{$matches[4]}");
         }
 
         return null;
@@ -261,7 +278,13 @@ class RadioRecordingService
             throw new \InvalidArgumentException('Invalid date or time format');
         }
 
-        return CarbonImmutable::createFromFormat('Y-m-d H:i:s', "$date $time");
+        return CarbonImmutable::createFromFormat('Y-m-d H:i:s', "$date $time", $this->displayTimezone);
+    }
+
+    private function recordingTimestamp(string $value): CarbonImmutable
+    {
+        return CarbonImmutable::createFromFormat('Y-m-d H:i:s', $value, $this->recordingsTimezone)
+            ->setTimezone($this->displayTimezone);
     }
 
     private function normalizeRelativePath(string $file): string

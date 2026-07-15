@@ -19,10 +19,12 @@ class RadioRecordingServiceTest extends TestCase
         $this->cutsPath = storage_path('framework/testing/cuts_' . uniqid());
 
         config([
+            'app.timezone' => 'UTC',
             'radio.recordings_path' => $this->recordingsPath,
             'radio.cuts_path' => $this->cutsPath,
             'radio.segment_seconds' => 10,
             'radio.ready_file_age_seconds' => 0,
+            'radio.recordings_timezone' => 'UTC',
         ]);
 
         File::makeDirectory($this->recordingsPath . '/2026-07-08/19', 0755, true);
@@ -78,6 +80,22 @@ class RadioRecordingServiceTest extends TestCase
         $this->assertSame(20, $hours[19]['coverage_seconds']);
         $this->assertSame('2026-07-08T19:53:42+00:00', $hours[19]['starts_at']);
         $this->assertSame('2026-07-08T19:54:02+00:00', $hours[19]['ends_at']);
+    }
+
+    public function test_it_converts_utc_recording_names_to_the_local_radio_day(): void
+    {
+        config(['app.timezone' => 'America/Lima']);
+        File::makeDirectory($this->recordingsPath . '/2026-07-09/02', 0755, true);
+        File::put($this->recordingsPath . '/2026-07-09/02/00-00.mp3', 'next UTC day audio');
+
+        $files = app(RadioRecordingService::class)->list('2026-07-08');
+        $hours = app(RadioRecordingService::class)->hours('2026-07-08');
+
+        $this->assertCount(3, $files);
+        $this->assertSame('2026-07-08T14:53:42-05:00', $files[0]['date']);
+        $this->assertSame('2026-07-08T21:00:00-05:00', $files[2]['date']);
+        $this->assertTrue($hours[14]['available']);
+        $this->assertTrue($hours[21]['available']);
     }
 
     public function test_it_ignores_empty_recordings_that_are_still_being_written(): void
