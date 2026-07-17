@@ -59,12 +59,12 @@ async function refresh(silent = false) {
     if (!silent) loading.value = true;
     try {
         const [overviewResponse, jobsResponse] = await Promise.all([
-            api.get('/developer/overview'),
-            api.get('/developer/archives'),
+            api.get('/overview'),
+            api.get('/archives'),
         ]);
         overview.value = overviewResponse.data;
         jobs.value = jobsResponse.data.jobs;
-        if (!silent) driveSettings.value = (await api.get('/developer/settings')).data;
+        if (!silent) driveSettings.value = (await api.get('/settings')).data;
         if (!selectedDate.value && overview.value.dates.length) selectedDate.value = overview.value.dates[0].date;
     } catch (exception) {
         error.value = message(exception, 'No se pudo actualizar el panel.');
@@ -84,7 +84,7 @@ async function saveDriveSettings() {
     if (credentialsFile.value) form.append('credentials', credentialsFile.value);
 
     try {
-        const response = await api.post('/developer/settings', form);
+        const response = await api.post('/settings', form);
         driveSettings.value = response.data;
         credentialsFile.value = null;
         notice.value = 'Configuracion de Google Drive guardada.';
@@ -101,7 +101,7 @@ async function testDrive() {
     error.value = '';
     notice.value = '';
     try {
-        const response = await api.post('/developer/drive/test');
+        const response = await api.post('/drive/test');
         notice.value = `Conexion correcta con ${response.data.folder_name}.`;
     } catch (exception) {
         error.value = message(exception, 'No se pudo conectar con Google Drive.');
@@ -116,7 +116,7 @@ async function queueArchive() {
     error.value = '';
     notice.value = '';
     try {
-        await api.post('/developer/archives', {
+        await api.post('/archives', {
             date: selectedDate.value,
             delete_after_upload: deleteAfterUpload.value,
         });
