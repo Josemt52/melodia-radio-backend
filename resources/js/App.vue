@@ -7,15 +7,19 @@ import {
     CalendarDays,
     Clock3,
     Download,
+    Headphones,
     ListMusic,
     LoaderCircle,
     LogOut,
+    Pencil,
     Play,
     Plus,
     Radio,
     RefreshCw,
+    Save,
     Scissors,
     Trash2,
+    X,
 } from '@lucide/vue';
 
 const pad = (value) => String(value).padStart(2, '0');
@@ -54,6 +58,10 @@ const outputFormat = ref('mp3');
 const previewUrl = ref('');
 const previewBaseSeconds = ref(0);
 const audioPlayer = ref(null);
+const editorPanel = ref(null);
+const editingClipId = ref(null);
+const playheadSeconds = ref(0);
+const selectionStopAt = ref(null);
 const authenticating = ref(false);
 const loadingHours = ref(false);
 const loadingPreview = ref(false);
@@ -65,6 +73,34 @@ let refreshTimer = null;
 const api = axios.create({ baseURL: '/api', headers: { Accept: 'application/json' } });
 
 const selectedSlot = computed(() => hours.value.find((item) => item.hour === selectedHour.value) || null);
+const slotStartSeconds = computed(() => {
+    if (!selectedSlot.value) return 0;
+    return secondsFromTime(timeFromIso(selectedSlot.value.starts_at, `${pad(selectedSlot.value.hour)}:00:00`));
+});
+const slotEndSeconds = computed(() => {
+    if (!selectedSlot.value) return 0;
+    const fallback = `${pad(selectedSlot.value.hour)}:59:59`;
+    const detected = secondsFromTime(timeFromIso(selectedSlot.value.ends_at, fallback));
+    return detected > slotStartSeconds.value ? detected : secondsFromTime(fallback);
+});
+const slotDuration = computed(() => Math.max(1, slotEndSeconds.value - slotStartSeconds.value));
+const startSecondsModel = computed({
+    get: () => secondsFromTime(start.value),
+    set: (value) => {
+        const bounded = Math.min(Number(value), secondsFromTime(end.value) - 1);
+        start.value = timeFromSeconds(Math.max(slotStartSeconds.value, bounded));
+    },
+});
+const endSecondsModel = computed({
+    get: () => secondsFromTime(end.value),
+    set: (value) => {
+        const bounded = Math.max(Number(value), secondsFromTime(start.value) + 1);
+        end.value = timeFromSeconds(Math.min(slotEndSeconds.value, bounded));
+    },
+});
+const selectionLeft = computed(() => `${Math.max(0, Math.min(100, ((startSecondsModel.value - slotStartSeconds.value) / slotDuration.value) * 100))}%`);
+const selectionWidth = computed(() => `${Math.max(0, Math.min(100, ((endSecondsModel.value - startSecondsModel.value) / slotDuration.value) * 100))}%`);
+const playheadLeft = computed(() => `${Math.max(0, Math.min(100, ((playheadSeconds.value - slotStartSeconds.value) / slotDuration.value) * 100))}%`);
 const rangeDuration = computed(() => Math.max(0, secondsFromTime(end.value) - secondsFromTime(start.value)));
 const totalDuration = computed(() => clips.value.reduce(
     (total, clip) => total + Math.max(0, secondsFromTime(clip.end) - secondsFromTime(clip.start)),
@@ -86,6 +122,12 @@ function applyToken() {
 function revokePreview() {
     if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
     previewUrl.value = '';
+}
+
+function revokeClipPreviews() {
+    clips.value.forEach((clip) => {
+        if (clip.previewUrl) URL.revokeObjectURL(clip.previewUrl);
+    });
 }
 
 async function errorMessage(exception, fallback) {
@@ -154,6 +196,7 @@ async function logout() {
     token.value = '';
     currentUser.value = null;
     hours.value = [];
+    revokeClipPreviews();
     clips.value = [];
     revokePreview();
     applyToken();
@@ -197,24 +240,28 @@ function selectHour(slot) {
     start.value = timeFromIso(slot.starts_at, hourStart);
     const detectedEnd = timeFromIso(slot.ends_at, hourEnd);
     end.value = secondsFromTime(detectedEnd) <= secondsFromTime(start.value) ? hourEnd : detectedEnd;
+    playheadSeconds.value = secondsFromTime(start.value);
+    editingClipId.value = null;
     revokePreview();
     notice.value = '';
 }
 
 async function loadPreview() {
-    if (!rangeDuration.value) return;
+    if (!selectedSlot.value) return;
     loadingPreview.value = true;
     error.value = '';
     revokePreview();
 
     try {
-        const ranges = [{ date: date.value, start: start.value, end: end.value }];
+        const previewStart = timeFromSeconds(slotStartSeconds.value);
+        const previewEnd = timeFromSeconds(slotEndSeconds.value);
+        const ranges = [{ date: date.value, start: previewStart, end: previewEnd }];
         const jobId = await processExport(ranges, 'mp3');
         const response = await downloadJob(jobId);
-        previewBaseSeconds.value = secondsFromTime(start.value);
+        previewBaseSeconds.value = slotStartSeconds.value;
         previewUrl.value = URL.createObjectURL(response.data);
         await nextTick();
-        audioPlayer.value?.play().catch(() => {});
+        playSelection();
     } catch (exception) {
         error.value = await errorMessage(exception, 'No se pudo preparar la reproduccion.');
     } finally {
@@ -222,11 +269,42 @@ async function loadPreview() {
     }
 }
 
+function playSelection() {
+    if (!audioPlayer.value || !previewUrl.value) return;
+    audioPlayer.value.currentTime = Math.max(0, startSecondsModel.value - previewBaseSeconds.value);
+    selectionStopAt.value = Math.max(0, endSecondsModel.value - previewBaseSeconds.value);
+    audioPlayer.value.play().catch(() => {});
+}
+
+function handleTimeUpdate() {
+    if (!audioPlayer.value) return;
+    playheadSeconds.value = previewBaseSeconds.value + audioPlayer.value.currentTime;
+
+    if (selectionStopAt.value !== null && audioPlayer.value.currentTime >= selectionStopAt.value) {
+        audioPlayer.value.pause();
+        selectionStopAt.value = null;
+    }
+}
+
 function markAtPlayer(field) {
     if (!audioPlayer.value || !previewUrl.value) return;
     const value = timeFromSeconds(previewBaseSeconds.value + audioPlayer.value.currentTime);
-    if (field === 'start') start.value = value;
-    else end.value = value;
+    const seconds = secondsFromTime(value);
+    if (field === 'start' && seconds < endSecondsModel.value) start.value = value;
+    if (field === 'end' && seconds > startSecondsModel.value) end.value = value;
+}
+
+function normalizeRange(field) {
+    let startSeconds = Math.max(slotStartSeconds.value, Math.min(slotEndSeconds.value - 1, secondsFromTime(start.value)));
+    let endSeconds = Math.max(slotStartSeconds.value + 1, Math.min(slotEndSeconds.value, secondsFromTime(end.value)));
+
+    if (startSeconds >= endSeconds) {
+        if (field === 'start') startSeconds = endSeconds - 1;
+        else endSeconds = startSeconds + 1;
+    }
+
+    start.value = timeFromSeconds(startSeconds);
+    end.value = timeFromSeconds(endSeconds);
 }
 
 function addClip() {
@@ -235,14 +313,101 @@ function addClip() {
         return;
     }
 
-    clips.value.push({
-        id: `${Date.now()}-${Math.random()}`,
-        date: date.value,
-        start: start.value,
-        end: end.value,
-    });
+    if (editingClipId.value) {
+        const clip = clips.value.find((item) => item.id === editingClipId.value);
+        if (clip) {
+            if (clip.previewUrl) URL.revokeObjectURL(clip.previewUrl);
+            Object.assign(clip, { date: date.value, start: start.value, end: end.value, previewUrl: '', loading: false });
+        }
+        editingClipId.value = null;
+        notice.value = 'Fragmento actualizado.';
+    } else {
+        clips.value.push({
+            id: `${Date.now()}-${Math.random()}`,
+            date: date.value,
+            start: start.value,
+            end: end.value,
+            previewUrl: '',
+            loading: false,
+        });
+        notice.value = 'Fragmento agregado a la lista.';
+    }
     error.value = '';
-    notice.value = 'Fragmento agregado a la lista.';
+}
+
+function cancelEditing() {
+    editingClipId.value = null;
+    if (selectedSlot.value) selectHour(selectedSlot.value);
+}
+
+async function editClip(clip) {
+    if (date.value !== clip.date) {
+        date.value = clip.date;
+        selectedHour.value = null;
+        await loadHours();
+    }
+
+    const hour = Math.floor(secondsFromTime(clip.start) / 3600);
+    const slot = hours.value.find((item) => item.hour === hour && item.available);
+    if (!slot) {
+        error.value = 'La grabacion original de este fragmento ya no esta disponible.';
+        return;
+    }
+
+    selectHour(slot);
+    start.value = clip.start;
+    end.value = clip.end;
+    editingClipId.value = clip.id;
+    await nextTick();
+    editorPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function removeClip(index) {
+    const clip = clips.value[index];
+    if (clip?.previewUrl) URL.revokeObjectURL(clip.previewUrl);
+    if (clip?.id === editingClipId.value) editingClipId.value = null;
+    clips.value.splice(index, 1);
+}
+
+async function prepareClip(clip) {
+    if (clip.previewUrl) return;
+    clip.loading = true;
+    error.value = '';
+
+    try {
+        const jobId = await processExport([{ date: clip.date, start: clip.start, end: clip.end }], 'mp3');
+        const response = await downloadJob(jobId);
+        clip.previewUrl = URL.createObjectURL(response.data);
+    } catch (exception) {
+        error.value = await errorMessage(exception, 'No se pudo preparar el fragmento.');
+    } finally {
+        clip.loading = false;
+    }
+}
+
+function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadClip(clip, index) {
+    clip.loading = true;
+    error.value = '';
+    try {
+        const jobId = await processExport([{ date: clip.date, start: clip.start, end: clip.end }], 'mp3');
+        const response = await downloadJob(jobId);
+        triggerDownload(response.data, `melodia_${clip.date}_corte-${index + 1}.mp3`);
+    } catch (exception) {
+        error.value = await errorMessage(exception, 'No se pudo descargar el fragmento.');
+    } finally {
+        clip.loading = false;
+    }
 }
 
 function moveClip(index, direction) {
@@ -267,14 +432,7 @@ async function downloadExport() {
             }));
         const jobId = await processExport(ranges, outputFormat.value);
         const response = await downloadJob(jobId);
-        const url = URL.createObjectURL(response.data);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `melodia_${date.value}.${outputFormat.value}`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        triggerDownload(response.data, `melodia_${date.value}.${outputFormat.value}`);
         notice.value = 'La descarga esta lista en tu dispositivo.';
     } catch (exception) {
         error.value = await errorMessage(exception, 'No se pudo generar la descarga.');
@@ -306,6 +464,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     stopPolling();
     revokePreview();
+    revokeClipPreviews();
 });
 </script>
 
@@ -383,37 +542,59 @@ onBeforeUnmount(() => {
             </section>
 
             <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
-                <section class="panel min-w-0">
+                <section ref="editorPanel" class="panel min-w-0 scroll-mt-4">
                     <div class="panel-heading">
                         <div class="flex items-center gap-2"><Play :size="17" /><h2>Editor de audio</h2></div>
                         <span v-if="selectedSlot" class="text-xs font-medium text-[#687780]">{{ selectedSlot.label }}</span>
                     </div>
 
                     <div v-if="selectedSlot" class="p-4 sm:p-5">
-                        <div class="waveform" aria-hidden="true">
-                            <span v-for="(height, index) in [28,52,38,74,46,82,34,66,44,90,56,72,32,62,48,84,40,70,52,78,36,64,46,86,54,68,30,76,42,60,50,80]" :key="index" :style="{ height: `${height}%` }"></span>
+                        <div class="timeline-editor">
+                            <div class="waveform-bars" aria-hidden="true">
+                                <span v-for="(height, index) in [28,52,38,74,46,82,34,66,44,90,56,72,32,62,48,84,40,70,52,78,36,64,46,86,54,68,30,76,42,60,50,80]" :key="index" :style="{ height: `${height}%` }"></span>
+                            </div>
+                            <div class="selection-region" :style="{ left: selectionLeft, width: selectionWidth }" aria-hidden="true"></div>
+                            <div v-if="previewUrl" class="timeline-playhead" :style="{ left: playheadLeft }" aria-hidden="true"></div>
+                            <div class="range-control">
+                                <input v-model.number="startSecondsModel" type="range" :min="slotStartSeconds" :max="slotEndSeconds - 1" step="1" aria-label="Inicio del fragmento">
+                                <input v-model.number="endSecondsModel" type="range" :min="slotStartSeconds + 1" :max="slotEndSeconds" step="1" aria-label="Fin del fragmento">
+                            </div>
                         </div>
 
-                        <audio ref="audioPlayer" class="mt-4 w-full" controls :src="previewUrl || undefined"></audio>
+                        <div class="mt-2 flex items-center justify-between text-xs font-medium text-[#687780]">
+                            <span>{{ timeFromSeconds(slotStartSeconds) }}</span>
+                            <span class="text-[#176b72]">Seleccionado: {{ formatDuration(rangeDuration) }}</span>
+                            <span>{{ timeFromSeconds(slotEndSeconds) }}</span>
+                        </div>
+
+                        <audio ref="audioPlayer" class="mt-4 w-full" controls preload="metadata" :src="previewUrl || undefined" @timeupdate="handleTimeUpdate" @ended="selectionStopAt = null"></audio>
 
                         <div class="mt-5 grid gap-3 sm:grid-cols-2">
-                            <label class="field-label">Inicio<input v-model="start" class="field" type="time" step="1"></label>
-                            <label class="field-label">Fin<input v-model="end" class="field" type="time" step="1"></label>
+                            <label class="field-label">Inicio<input v-model="start" class="field" type="time" step="1" @change="normalizeRange('start')"></label>
+                            <label class="field-label">Fin<input v-model="end" class="field" type="time" step="1" @change="normalizeRange('end')"></label>
                         </div>
 
                         <div class="mt-3 flex flex-wrap items-center gap-2">
-                            <button class="secondary-button" :disabled="loadingPreview || !rangeDuration" @click="loadPreview">
+                            <button class="secondary-button" :disabled="loadingPreview" @click="loadPreview">
                                 <LoaderCircle v-if="loadingPreview" :size="16" class="animate-spin" />
-                                <Play v-else :size="16" />
-                                {{ loadingPreview ? 'Preparando...' : 'Cargar audio' }}
+                                <Headphones v-else :size="16" />
+                                {{ loadingPreview ? 'Preparando...' : (previewUrl ? 'Recargar hora' : 'Cargar hora') }}
                             </button>
+                            <button class="secondary-button" :disabled="!previewUrl || !rangeDuration" @click="playSelection"><Play :size="16" /> Escuchar seleccion</button>
                             <button class="secondary-button" :disabled="!previewUrl" @click="markAtPlayer('start')"><Clock3 :size="16" /> Marcar inicio</button>
                             <button class="secondary-button" :disabled="!previewUrl" @click="markAtPlayer('end')"><Clock3 :size="16" /> Marcar fin</button>
                         </div>
 
                         <div class="mt-5 flex flex-col gap-3 border-t border-[#e2e6e8] pt-4 sm:flex-row sm:items-center sm:justify-between">
-                            <span class="text-sm text-[#687780]">Duracion <strong class="text-[#172027]">{{ formatDuration(rangeDuration) }}</strong></span>
-                            <button class="primary-button" :disabled="!rangeDuration" @click="addClip"><Plus :size="17" /> Agregar fragmento</button>
+                            <span class="text-sm text-[#687780]">{{ editingClipId ? 'Editando fragmento' : 'Duracion' }} <strong class="text-[#172027]">{{ formatDuration(rangeDuration) }}</strong></span>
+                            <div class="flex flex-wrap gap-2">
+                                <button v-if="editingClipId" class="secondary-button" @click="cancelEditing"><X :size="16" /> Cancelar</button>
+                                <button class="primary-button" :disabled="!rangeDuration" @click="addClip">
+                                    <Save v-if="editingClipId" :size="17" />
+                                    <Plus v-else :size="17" />
+                                    {{ editingClipId ? 'Guardar cambios' : 'Agregar fragmento' }}
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -429,16 +610,27 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-if="clips.length" class="divide-y divide-[#e2e6e8]">
-                        <div v-for="(clip, index) in clips" :key="clip.id" class="flex items-center gap-3 p-3">
-                            <span class="grid size-8 shrink-0 place-items-center rounded bg-[#edf4f4] text-xs font-bold text-[#176b72]">{{ index + 1 }}</span>
-                            <div class="min-w-0 flex-1">
-                                <p class="truncate text-sm font-semibold">{{ clip.start }} - {{ clip.end }}</p>
-                                <p class="mt-0.5 text-xs text-[#687780]">{{ clip.date }} · {{ formatDuration(secondsFromTime(clip.end) - secondsFromTime(clip.start)) }}</p>
+                        <div v-for="(clip, index) in clips" :key="clip.id" class="clip-item" :class="{ editing: editingClipId === clip.id }">
+                            <div class="flex items-center gap-3">
+                                <span class="grid size-8 shrink-0 place-items-center rounded bg-[#edf4f4] text-xs font-bold text-[#176b72]">{{ index + 1 }}</span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="truncate text-sm font-semibold">{{ clip.start }} - {{ clip.end }}</p>
+                                    <p class="mt-0.5 text-xs text-[#687780]">{{ clip.date }} | {{ formatDuration(secondsFromTime(clip.end) - secondsFromTime(clip.start)) }}</p>
+                                </div>
+                                <LoaderCircle v-if="clip.loading" :size="17" class="shrink-0 animate-spin text-[#176b72]" />
                             </div>
-                            <div class="flex shrink-0">
-                                <button class="mini-icon" title="Subir" :disabled="index === 0" @click="moveClip(index, -1)"><ArrowUp :size="15" /></button>
-                                <button class="mini-icon" title="Bajar" :disabled="index === clips.length - 1" @click="moveClip(index, 1)"><ArrowDown :size="15" /></button>
-                                <button class="mini-icon danger" title="Eliminar" @click="clips.splice(index, 1)"><Trash2 :size="15" /></button>
+                            <audio v-if="clip.previewUrl" class="mt-3 w-full" controls preload="metadata" :src="clip.previewUrl"></audio>
+                            <div class="mt-3 flex items-center justify-between gap-2">
+                                <div class="flex min-w-0 gap-1">
+                                    <button class="clip-action" title="Escuchar fragmento" :disabled="clip.loading" @click="prepareClip(clip)"><Headphones :size="15" /> {{ clip.previewUrl ? 'Audio listo' : 'Escuchar' }}</button>
+                                    <button class="clip-action" title="Editar fragmento" :disabled="clip.loading" @click="editClip(clip)"><Pencil :size="15" /> Editar</button>
+                                    <button class="mini-icon" title="Descargar corte en MP3" :disabled="clip.loading" @click="downloadClip(clip, index)"><Download :size="15" /></button>
+                                </div>
+                                <div class="flex shrink-0">
+                                    <button class="mini-icon" title="Subir" :disabled="index === 0" @click="moveClip(index, -1)"><ArrowUp :size="15" /></button>
+                                    <button class="mini-icon" title="Bajar" :disabled="index === clips.length - 1" @click="moveClip(index, 1)"><ArrowDown :size="15" /></button>
+                                    <button class="mini-icon danger" title="Eliminar" @click="removeClip(index)"><Trash2 :size="15" /></button>
+                                </div>
                             </div>
                         </div>
                     </div>

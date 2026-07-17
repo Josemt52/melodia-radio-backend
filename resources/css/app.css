@@ -39,6 +39,7 @@ input:focus-visible {
     .icon-button { @apply grid size-9 place-items-center rounded-md border border-[#d3dade] bg-white text-[#45565e] transition hover:bg-[#f1f4f5] disabled:opacity-50; }
     .mini-icon { @apply grid size-7 place-items-center rounded text-[#5c6c73] transition hover:bg-[#edf1f2] disabled:cursor-not-allowed disabled:opacity-25; }
     .mini-icon.danger { @apply text-[#a33a32] hover:bg-[#fff0ef]; }
+    .clip-action { @apply inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-semibold text-[#456067] transition hover:bg-[#edf3f3] disabled:cursor-not-allowed disabled:opacity-45; }
     .alert-error { @apply rounded-md border border-[#e5b9b5] bg-[#fff2f0] px-4 py-3 text-sm font-medium text-[#8d2d27]; }
     .alert-success { @apply rounded-md border border-[#acd4bd] bg-[#eef9f2] px-4 py-3 text-sm font-medium text-[#22613b]; }
     .counter { @apply grid min-w-6 place-items-center rounded bg-[#e8f1f1] px-1.5 py-0.5 text-xs text-[#176b72]; }
@@ -69,23 +70,119 @@ input:focus-visible {
 .hour-slot.unavailable { cursor: not-allowed; background: #eceff0; color: #89959a; }
 .live-badge { border-radius: 3px; background: #b43d2d; padding: 2px 4px; color: #fff; font-size: 8px; font-weight: 800; }
 
-.waveform {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 128px;
-    padding: 16px;
+.timeline-editor {
+    position: relative;
+    height: 144px;
     overflow: hidden;
     border: 1px solid #d9e0e2;
     border-radius: 5px;
-    background: #f7f9f9;
+    background: #f4f7f7;
 }
 
-.waveform span { flex: 1; min-width: 2px; max-width: 10px; border-radius: 2px; background: #3a858a; opacity: .82; }
+.waveform-bars {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    padding: 16px;
+    opacity: .58;
+}
+
+.waveform-bars span { flex: 1; min-width: 2px; max-width: 12px; border-radius: 2px; background: #2e757b; }
+
+.selection-region {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 2px;
+    border-right: 2px solid #176b72;
+    border-left: 2px solid #176b72;
+    background: rgba(23, 107, 114, .18);
+    pointer-events: none;
+}
+
+.timeline-playhead {
+    position: absolute;
+    z-index: 3;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #b43d2d;
+    pointer-events: none;
+}
+
+.timeline-playhead::before {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 0 0 5px 5px;
+    background: #b43d2d;
+    content: '';
+    transform: translateX(-50%);
+}
+
+.range-control,
+.range-control input {
+    position: absolute;
+    inset: 0;
+}
+
+.range-control input {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    pointer-events: none;
+    appearance: none;
+}
+
+.range-control input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+.range-control input::-moz-range-track { height: 100%; background: transparent; }
+.range-control input::-webkit-slider-thumb {
+    width: 20px;
+    height: 42px;
+    margin-top: 51px;
+    border: 3px solid #fff;
+    border-radius: 5px;
+    background: #176b72;
+    box-shadow: 0 1px 4px rgba(16, 45, 48, .35);
+    cursor: ew-resize;
+    pointer-events: auto;
+    appearance: none;
+}
+.range-control input::-moz-range-thumb {
+    width: 14px;
+    height: 36px;
+    border: 3px solid #fff;
+    border-radius: 5px;
+    background: #176b72;
+    box-shadow: 0 1px 4px rgba(16, 45, 48, .35);
+    cursor: ew-resize;
+    pointer-events: auto;
+}
+
+.clip-item {
+    padding: 12px;
+    border-left: 3px solid transparent;
+    transition: background 150ms, border-color 150ms;
+}
+
+.clip-item.editing {
+    border-left-color: #176b72;
+    background: #f1f7f7;
+}
 
 @media (max-width: 1100px) { .hour-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .hour-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 420px) { .hour-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 480px) {
+    .timeline-editor { height: 120px; }
+    .range-control input::-webkit-slider-thumb { margin-top: 39px; }
+    .clip-action { width: 28px; overflow: hidden; padding: 0 6px; color: transparent; gap: 0; }
+    .clip-action svg { flex: 0 0 auto; color: #456067; }
+}
 
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
