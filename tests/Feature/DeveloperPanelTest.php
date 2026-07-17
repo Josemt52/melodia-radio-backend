@@ -55,6 +55,13 @@ class DeveloperPanelTest extends TestCase
             ->assertJsonPath('drive.configured', false);
     }
 
+    public function test_cached_panel_bundle_can_use_legacy_developer_prefix(): void
+    {
+        $this->getJson('/api/'.config('developer.api_path').'/developer/overview')
+            ->assertOk()
+            ->assertJsonPath('total_files', 1);
+    }
+
     public function test_archive_is_not_queued_until_drive_is_configured(): void
     {
         $this->postJson('/api/'.config('developer.api_path').'/archives', [

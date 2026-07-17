@@ -25,11 +25,14 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         ->name('api.exports.download');
 });
 
-Route::prefix(config('developer.api_path'))->middleware('throttle:60,1')->group(function () {
+$developerRoutes = function () {
     Route::get('/overview', [DeveloperController::class, 'overview']);
     Route::get('/settings', [DeveloperController::class, 'settings']);
     Route::post('/settings', [DeveloperController::class, 'updateSettings']);
     Route::post('/drive/test', [DeveloperController::class, 'testDrive']);
     Route::post('/archives', [DeveloperController::class, 'createArchive']);
     Route::get('/archives', [DeveloperController::class, 'archives']);
-});
+};
+
+Route::prefix(config('developer.api_path'))->middleware('throttle:60,1')->group($developerRoutes);
+Route::prefix(config('developer.api_path').'/developer')->middleware('throttle:60,1')->group($developerRoutes);
