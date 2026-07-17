@@ -11,6 +11,7 @@ import {
     ListMusic,
     LoaderCircle,
     LogOut,
+    Maximize2,
     Pencil,
     Play,
     Plus,
@@ -18,8 +19,12 @@ import {
     RefreshCw,
     Save,
     Scissors,
+    SkipBack,
+    SkipForward,
     Trash2,
     X,
+    ZoomIn,
+    ZoomOut,
 } from '@lucide/vue';
 
 const pad = (value) => String(value).padStart(2, '0');
@@ -62,6 +67,9 @@ const editorPanel = ref(null);
 const editingClipId = ref(null);
 const playheadSeconds = ref(0);
 const selectionStopAt = ref(null);
+const zoomLevel = ref(1);
+const viewportStartSeconds = ref(0);
+const timelineFocus = ref('start');
 const authenticating = ref(false);
 const loadingHours = ref(false);
 const loadingPreview = ref(false);
@@ -84,6 +92,15 @@ const slotEndSeconds = computed(() => {
     return detected > slotStartSeconds.value ? detected : secondsFromTime(fallback);
 });
 const slotDuration = computed(() => Math.max(1, slotEndSeconds.value - slotStartSeconds.value));
+const viewportDuration = computed(() => Math.max(1, Math.floor(slotDuration.value / zoomLevel.value)));
+const viewportMaxStart = computed(() => Math.max(slotStartSeconds.value, slotEndSeconds.value - viewportDuration.value));
+const viewportStartModel = computed({
+    get: () => viewportStartSeconds.value,
+    set: (value) => {
+        viewportStartSeconds.value = Math.max(slotStartSeconds.value, Math.min(viewportMaxStart.value, Number(value)));
+    },
+});
+const viewportEndSeconds = computed(() => Math.min(slotEndSeconds.value, viewportStartModel.value + viewportDuration.value));
 const startSecondsModel = computed({
     get: () => secondsFromTime(start.value),
     set: (value) => {
@@ -98,9 +115,15 @@ const endSecondsModel = computed({
         end.value = timeFromSeconds(Math.min(slotEndSeconds.value, bounded));
     },
 });
-const selectionLeft = computed(() => `${Math.max(0, Math.min(100, ((startSecondsModel.value - slotStartSeconds.value) / slotDuration.value) * 100))}%`);
-const selectionWidth = computed(() => `${Math.max(0, Math.min(100, ((endSecondsModel.value - startSecondsModel.value) / slotDuration.value) * 100))}%`);
-const playheadLeft = computed(() => `${Math.max(0, Math.min(100, ((playheadSeconds.value - slotStartSeconds.value) / slotDuration.value) * 100))}%`);
+const visibleSelectionStart = computed(() => Math.max(startSecondsModel.value, viewportStartModel.value));
+const visibleSelectionEnd = computed(() => Math.min(endSecondsModel.value, viewportEndSeconds.value));
+const selectionVisible = computed(() => visibleSelectionEnd.value > visibleSelectionStart.value);
+const selectionLeft = computed(() => `${((visibleSelectionStart.value - viewportStartModel.value) / viewportDuration.value) * 100}%`);
+const selectionWidth = computed(() => `${((visibleSelectionEnd.value - visibleSelectionStart.value) / viewportDuration.value) * 100}%`);
+const playheadVisible = computed(() => playheadSeconds.value >= viewportStartModel.value && playheadSeconds.value <= viewportEndSeconds.value);
+const playheadLeft = computed(() => `${((playheadSeconds.value - viewportStartModel.value) / viewportDuration.value) * 100}%`);
+const startBoundaryVisible = computed(() => startSecondsModel.value >= viewportStartModel.value && startSecondsModel.value <= viewportEndSeconds.value);
+const endBoundaryVisible = computed(() => endSecondsModel.value >= viewportStartModel.value && endSecondsModel.value <= viewportEndSeconds.value);
 const rangeDuration = computed(() => Math.max(0, secondsFromTime(end.value) - secondsFromTime(start.value)));
 const totalDuration = computed(() => clips.value.reduce(
     (total, clip) => total + Math.max(0, secondsFromTime(clip.end) - secondsFromTime(clip.start)),
@@ -241,9 +264,40 @@ function selectHour(slot) {
     const detectedEnd = timeFromIso(slot.ends_at, hourEnd);
     end.value = secondsFromTime(detectedEnd) <= secondsFromTime(start.value) ? hourEnd : detectedEnd;
     playheadSeconds.value = secondsFromTime(start.value);
+    zoomLevel.value = 1;
+    viewportStartSeconds.value = secondsFromTime(start.value);
+    timelineFocus.value = 'start';
     editingClipId.value = null;
     revokePreview();
     notice.value = '';
+}
+
+function focusTimeline(value) {
+    timelineFocus.value = value;
+    const point = value === 'end' ? endSecondsModel.value : startSecondsModel.value;
+    viewportStartModel.value = point - Math.floor(viewportDuration.value / 2);
+}
+
+function changeZoom(direction) {
+    const levels = [1, 2, 4, 8, 16, 32];
+    const currentIndex = levels.indexOf(zoomLevel.value);
+    const nextIndex = Math.max(0, Math.min(levels.length - 1, currentIndex + direction));
+    if (nextIndex === currentIndex) return;
+
+    const focusPoint = timelineFocus.value === 'start'
+        ? startSecondsModel.value
+        : timelineFocus.value === 'end'
+            ? endSecondsModel.value
+            : viewportStartModel.value + Math.floor(viewportDuration.value / 2);
+    zoomLevel.value = levels[nextIndex];
+    if (timelineFocus.value === 'start' || timelineFocus.value === 'end') focusTimeline(timelineFocus.value);
+    else viewportStartModel.value = focusPoint - Math.floor(viewportDuration.value / 2);
+}
+
+function resetZoom() {
+    zoomLevel.value = 1;
+    viewportStartModel.value = slotStartSeconds.value;
+    timelineFocus.value = 'start';
 }
 
 async function loadPreview() {
@@ -549,22 +603,46 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-if="selectedSlot" class="p-4 sm:p-5">
+                        <div class="timeline-toolbar">
+                            <div class="flex items-center gap-1">
+                                <button class="mini-icon" title="Enfocar inicio" :disabled="zoomLevel === 1" @click="focusTimeline('start')"><SkipBack :size="16" /></button>
+                                <button class="mini-icon" title="Alejar" :disabled="zoomLevel === 1" @click="changeZoom(-1)"><ZoomOut :size="16" /></button>
+                                <span class="zoom-value">{{ zoomLevel }}x</span>
+                                <button class="mini-icon" title="Acercar" :disabled="zoomLevel === 32" @click="changeZoom(1)"><ZoomIn :size="16" /></button>
+                                <button class="mini-icon" title="Enfocar fin" :disabled="zoomLevel === 1" @click="focusTimeline('end')"><SkipForward :size="16" /></button>
+                                <button class="mini-icon" title="Ver hora completa" :disabled="zoomLevel === 1" @click="resetZoom"><Maximize2 :size="15" /></button>
+                            </div>
+                            <span class="timeline-window">{{ timeFromSeconds(viewportStartModel) }} - {{ timeFromSeconds(viewportEndSeconds) }}</span>
+                        </div>
+
                         <div class="timeline-editor">
                             <div class="waveform-bars" aria-hidden="true">
                                 <span v-for="(height, index) in [28,52,38,74,46,82,34,66,44,90,56,72,32,62,48,84,40,70,52,78,36,64,46,86,54,68,30,76,42,60,50,80]" :key="index" :style="{ height: `${height}%` }"></span>
                             </div>
-                            <div class="selection-region" :style="{ left: selectionLeft, width: selectionWidth }" aria-hidden="true"></div>
-                            <div v-if="previewUrl" class="timeline-playhead" :style="{ left: playheadLeft }" aria-hidden="true"></div>
+                            <div v-if="selectionVisible" class="selection-region" :style="{ left: selectionLeft, width: selectionWidth }" aria-hidden="true"></div>
+                            <div v-if="previewUrl && playheadVisible" class="timeline-playhead" :style="{ left: playheadLeft }" aria-hidden="true"></div>
                             <div class="range-control">
-                                <input v-model.number="startSecondsModel" type="range" :min="slotStartSeconds" :max="slotEndSeconds - 1" step="1" aria-label="Inicio del fragmento">
-                                <input v-model.number="endSecondsModel" type="range" :min="slotStartSeconds + 1" :max="slotEndSeconds" step="1" aria-label="Fin del fragmento">
+                                <input v-if="startBoundaryVisible" v-model.number="startSecondsModel" type="range" :min="viewportStartModel" :max="viewportEndSeconds" step="1" aria-label="Inicio del fragmento">
+                                <input v-if="endBoundaryVisible" v-model.number="endSecondsModel" type="range" :min="viewportStartModel" :max="viewportEndSeconds" step="1" aria-label="Fin del fragmento">
                             </div>
                         </div>
 
+                        <input
+                            v-if="zoomLevel > 1"
+                            v-model.number="viewportStartModel"
+                            class="timeline-pan"
+                            type="range"
+                            :min="slotStartSeconds"
+                            :max="viewportMaxStart"
+                            step="1"
+                            aria-label="Desplazar linea de tiempo"
+                            @input="timelineFocus = 'center'"
+                        >
+
                         <div class="mt-2 flex items-center justify-between text-xs font-medium text-[#687780]">
-                            <span>{{ timeFromSeconds(slotStartSeconds) }}</span>
+                            <span>{{ timeFromSeconds(viewportStartModel) }}</span>
                             <span class="text-[#176b72]">Seleccionado: {{ formatDuration(rangeDuration) }}</span>
-                            <span>{{ timeFromSeconds(slotEndSeconds) }}</span>
+                            <span>{{ timeFromSeconds(viewportEndSeconds) }}</span>
                         </div>
 
                         <audio ref="audioPlayer" class="mt-4 w-full" controls preload="metadata" :src="previewUrl || undefined" @timeupdate="handleTimeUpdate" @ended="selectionStopAt = null"></audio>

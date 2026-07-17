@@ -116,6 +116,33 @@ input:focus-visible {
     background: #f4f7f7;
 }
 
+.timeline-toolbar {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.zoom-value {
+    min-width: 38px;
+    padding: 3px 6px;
+    border-radius: 3px;
+    background: #e8f1f1;
+    color: #176b72;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.timeline-window {
+    color: #687780;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .waveform-bars {
     display: flex;
     align-items: center;
@@ -125,7 +152,15 @@ input:focus-visible {
     opacity: .58;
 }
 
-.waveform-bars span { flex: 1; min-width: 2px; max-width: 12px; border-radius: 2px; background: #2e757b; }
+.waveform-bars span { flex: 1; min-width: 2px; border-radius: 2px; background: #2e757b; }
+
+.timeline-pan {
+    width: 100%;
+    height: 18px;
+    margin: 6px 0 0;
+    accent-color: #176b72;
+    cursor: ew-resize;
+}
 
 .selection-region {
     position: absolute;
@@ -218,6 +253,8 @@ input:focus-visible {
 @media (max-width: 520px) { .metric-grid { grid-template-columns: 1fr; } }
 @media (max-width: 480px) {
     .timeline-editor { height: 120px; }
+    .timeline-toolbar { align-items: flex-start; }
+    .timeline-window { padding-top: 7px; }
     .range-control input::-webkit-slider-thumb { margin-top: 39px; }
     .clip-action { width: 28px; overflow: hidden; padding: 0 6px; color: transparent; gap: 0; }
     .clip-action svg { flex: 0 0 auto; color: #456067; }
