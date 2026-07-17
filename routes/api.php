@@ -27,6 +27,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
 
 Route::prefix('developer')->middleware(['auth:sanctum', 'developer', 'throttle:60,1'])->group(function () {
     Route::get('/overview', [DeveloperController::class, 'overview']);
+    Route::get('/settings', [DeveloperController::class, 'settings']);
+    Route::post('/settings', [DeveloperController::class, 'updateSettings']);
     Route::post('/drive/test', [DeveloperController::class, 'testDrive']);
     Route::post('/archives', [DeveloperController::class, 'createArchive']);
     Route::get('/archives', [DeveloperController::class, 'archives']);

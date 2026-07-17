@@ -16,17 +16,20 @@ import {
     TriangleAlert,
 } from '@lucide/vue';
 
-const token = ref(localStorage.getItem('melodia_api_token') || '');
+const token = ref(localStorage.getItem('melodia_developer_token') || '');
 const username = ref('');
 const password = ref('');
 const user = ref(null);
 const overview = ref(null);
 const jobs = ref([]);
+const driveSettings = ref({ folder_id: '', upload_chunk_mb: 8, credentials_configured: false, service_account_email: null });
+const credentialsFile = ref(null);
 const selectedDate = ref('');
 const deleteAfterUpload = ref(false);
 const loading = ref(false);
 const authenticating = ref(false);
 const testingDrive = ref(false);
+const savingSettings = ref(false);
 const queueing = ref(false);
 const error = ref('');
 const notice = ref('');
@@ -66,17 +69,22 @@ async function login() {
     error.value = '';
     try {
         const response = await api.post('/login', { username: username.value, password: password.value });
-        if (response.data.user.role !== 'developer') throw new Error('Esta cuenta no tiene acceso de desarrollador.');
+        if (response.data.user.role !== 'developer') {
+            api.defaults.headers.common.Authorization = `Bearer ${response.data.token}`;
+            try { await api.post('/logout'); } catch { /* The temporary token will expire normally. */ }
+            delete api.defaults.headers.common.Authorization;
+            throw new Error('Esta cuenta no tiene acceso de desarrollador.');
+        }
         token.value = response.data.token;
         user.value = response.data.user;
-        localStorage.setItem('melodia_api_token', token.value);
+        localStorage.setItem('melodia_developer_token', token.value);
         applyToken();
         password.value = '';
         await refresh();
         startPolling();
     } catch (exception) {
         token.value = '';
-        localStorage.removeItem('melodia_api_token');
+        localStorage.removeItem('melodia_developer_token');
         error.value = message(exception, exception.message || 'No se pudo iniciar sesion.');
     } finally {
         authenticating.value = false;
@@ -105,7 +113,7 @@ async function logout(request = true) {
     user.value = null;
     overview.value = null;
     jobs.value = [];
-    localStorage.removeItem('melodia_api_token');
+    localStorage.removeItem('melodia_developer_token');
     applyToken();
 }
 
@@ -118,11 +126,35 @@ async function refresh(silent = false) {
         ]);
         overview.value = overviewResponse.data;
         jobs.value = jobsResponse.data.jobs;
+        if (!silent) driveSettings.value = (await api.get('/developer/settings')).data;
         if (!selectedDate.value && overview.value.dates.length) selectedDate.value = overview.value.dates[0].date;
     } catch (exception) {
         error.value = message(exception, 'No se pudo actualizar el panel.');
     } finally {
         loading.value = false;
+    }
+}
+
+async function saveDriveSettings() {
+    savingSettings.value = true;
+    error.value = '';
+    notice.value = '';
+
+    const form = new FormData();
+    form.append('folder_id', driveSettings.value.folder_id);
+    form.append('upload_chunk_mb', driveSettings.value.upload_chunk_mb);
+    if (credentialsFile.value) form.append('credentials', credentialsFile.value);
+
+    try {
+        const response = await api.post('/developer/settings', form);
+        driveSettings.value = response.data;
+        credentialsFile.value = null;
+        notice.value = 'Configuracion de Google Drive guardada.';
+        await refresh(true);
+    } catch (exception) {
+        error.value = message(exception, 'No se pudo guardar la configuracion.');
+    } finally {
+        savingSettings.value = false;
     }
 }
 
@@ -241,10 +273,20 @@ onBeforeUnmount(stopPolling);
                     <aside class="space-y-5">
                         <section class="panel">
                             <div class="panel-heading"><div class="flex items-center gap-2"><Cloud :size="17" /><h2>Google Drive</h2></div><CheckCircle2 v-if="overview.drive.configured" :size="18" class="text-[#287246]" /></div>
-                            <div class="p-4">
-                                <p class="break-all text-xs text-[#687780]">{{ overview.drive.account || overview.drive.error || 'Credenciales no configuradas' }}</p>
-                                <button class="secondary-button mt-4 w-full" :disabled="!overview.drive.configured || testingDrive" @click="testDrive"><LoaderCircle v-if="testingDrive" :size="16" class="animate-spin" /><Cloud v-else :size="16" />Probar conexion</button>
-                            </div>
+                            <form class="space-y-4 p-4" @submit.prevent="saveDriveSettings">
+                                <label class="field-label">ID de carpeta en unidad compartida<input v-model.trim="driveSettings.folder_id" class="field" required placeholder="1AbC..."></label>
+                                <label class="field-label">Credencial de cuenta de servicio
+                                    <input class="file-field" type="file" accept="application/json,.json" :required="!driveSettings.credentials_configured" @change="credentialsFile = $event.target.files[0] || null">
+                                    <span v-if="driveSettings.service_account_email" class="mt-1 block break-all text-[11px] font-normal text-[#687780]">{{ driveSettings.service_account_email }}</span>
+                                </label>
+                                <label class="field-label">Bloque de carga
+                                    <select v-model.number="driveSettings.upload_chunk_mb" class="field">
+                                        <option :value="4">4 MB</option><option :value="8">8 MB</option><option :value="16">16 MB</option><option :value="32">32 MB</option><option :value="64">64 MB</option>
+                                    </select>
+                                </label>
+                                <button class="primary-button w-full" :disabled="savingSettings"><LoaderCircle v-if="savingSettings" :size="16" class="animate-spin" /><Cloud v-else :size="16" />Guardar configuracion</button>
+                                <button class="secondary-button w-full" type="button" :disabled="!overview.drive.configured || testingDrive" @click="testDrive"><LoaderCircle v-if="testingDrive" :size="16" class="animate-spin" /><CheckCircle2 v-else :size="16" />Probar conexion</button>
+                            </form>
                         </section>
 
                         <section class="panel">

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\GoogleDriveService;
 use Illuminate\Support\Facades\File;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -22,9 +23,16 @@ class DeveloperPanelTest extends TestCase
             'radio.recordings_path' => $this->recordingsPath,
             'developer.archive_path' => $this->recordingsPath.'/archives',
             'developer.archive_job_path' => $this->recordingsPath.'/jobs',
-            'developer.google_credentials_path' => null,
-            'developer.google_folder_id' => null,
         ]);
+
+        $drive = \Mockery::mock(GoogleDriveService::class);
+        $drive->shouldReceive('status')->andReturn([
+            'configured' => false,
+            'account' => null,
+            'folder_id' => null,
+            'error' => null,
+        ]);
+        $this->app->instance(GoogleDriveService::class, $drive);
     }
 
     protected function tearDown(): void

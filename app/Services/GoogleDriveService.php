@@ -3,11 +3,12 @@
 namespace App\Services;
 
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 
 class GoogleDriveService
 {
+    public function __construct(private DeveloperSettingsService $settings) {}
+
     public function status(): array
     {
         try {
@@ -22,9 +23,9 @@ class GoogleDriveService
         }
 
         return [
-            'configured' => $credentials !== null && (bool) config('developer.google_folder_id'),
+            'configured' => $credentials !== null && (bool) $this->settings->get('google_drive_folder_id'),
             'account' => $credentials['client_email'] ?? null,
-            'folder_id' => config('developer.google_folder_id') ? 'Configurada' : null,
+            'folder_id' => $this->settings->get('google_drive_folder_id') ? 'Configurada' : null,
             'error' => null,
         ];
     }
@@ -42,12 +43,12 @@ class GoogleDriveService
 
     public function upload(string $path, string $filename): array
     {
-        if (! File::isFile($path)) {
+        if (! is_file($path)) {
             throw new \RuntimeException('El archivo de respaldo no existe.');
         }
 
         $client = $this->client();
-        $size = File::size($path);
+        $size = filesize($path);
         $session = $client->withHeaders([
             'X-Upload-Content-Type' => 'application/gzip',
             'X-Upload-Content-Length' => (string) $size,
@@ -69,7 +70,7 @@ class GoogleDriveService
 
         $offset = 0;
         $result = null;
-        $chunkSize = max(262144, (int) config('developer.upload_chunk_bytes'));
+        $chunkSize = max(1, (int) $this->settings->get('google_drive_upload_chunk_mb', config('developer.default_upload_chunk_mb'))) * 1048576;
         $chunkSize -= $chunkSize % 262144;
 
         try {
@@ -147,16 +148,16 @@ class GoogleDriveService
 
     private function credentials(bool $required = true): ?array
     {
-        $path = config('developer.google_credentials_path');
-        if (! $path || ! File::isFile($path)) {
+        $json = $this->settings->get('google_drive_credentials');
+        if (! $json) {
             if ($required) {
-                throw new \RuntimeException('Falta configurar GOOGLE_DRIVE_CREDENTIALS_PATH.');
+                throw new \RuntimeException('Falta cargar la credencial de Google Drive.');
             }
 
             return null;
         }
 
-        $credentials = json_decode(File::get($path), true, flags: JSON_THROW_ON_ERROR);
+        $credentials = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         if (empty($credentials['client_email']) || empty($credentials['private_key'])) {
             throw new \RuntimeException('La credencial de Google Drive no es valida.');
         }
@@ -166,8 +167,8 @@ class GoogleDriveService
 
     private function folderId(): string
     {
-        return config('developer.google_folder_id')
-            ?: throw new \RuntimeException('Falta configurar GOOGLE_DRIVE_FOLDER_ID.');
+        return $this->settings->get('google_drive_folder_id')
+            ?: throw new \RuntimeException('Falta configurar el ID de carpeta de Google Drive.');
     }
 
     private function base64Url(string $value): string
