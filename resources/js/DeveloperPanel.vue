@@ -8,18 +8,12 @@ import {
     Database,
     HardDrive,
     LoaderCircle,
-    LockKeyhole,
-    LogOut,
     RefreshCw,
     Server,
     ShieldCheck,
     TriangleAlert,
 } from '@lucide/vue';
 
-const token = ref(localStorage.getItem('melodia_developer_token') || '');
-const username = ref('');
-const password = ref('');
-const user = ref(null);
 const overview = ref(null);
 const jobs = ref([]);
 const driveSettings = ref({ folder_id: '', upload_chunk_mb: 8, credentials_configured: false, service_account_email: null });
@@ -27,7 +21,6 @@ const credentialsFile = ref(null);
 const selectedDate = ref('');
 const deleteAfterUpload = ref(false);
 const loading = ref(false);
-const authenticating = ref(false);
 const testingDrive = ref(false);
 const savingSettings = ref(false);
 const queueing = ref(false);
@@ -35,18 +28,16 @@ const error = ref('');
 const notice = ref('');
 let refreshTimer = null;
 
-const api = axios.create({ baseURL: '/api', headers: { Accept: 'application/json' } });
+const api = axios.create({
+    baseURL: document.querySelector('meta[name="admin-api"]')?.content,
+    headers: { Accept: 'application/json' },
+});
 const diskUsed = computed(() => overview.value
     ? Math.max(0, overview.value.disk_total_bytes - overview.value.disk_free_bytes)
     : 0);
 const diskPercent = computed(() => overview.value?.disk_total_bytes
     ? Math.round((diskUsed.value / overview.value.disk_total_bytes) * 100)
     : 0);
-
-function applyToken() {
-    if (token.value) api.defaults.headers.common.Authorization = `Bearer ${token.value}`;
-    else delete api.defaults.headers.common.Authorization;
-}
 
 function formatBytes(value) {
     const bytes = Number(value || 0);
@@ -62,59 +53,6 @@ function message(exception, fallback) {
 
 function statusLabel(status) {
     return ({ queued: 'En cola', processing: 'Procesando', completed: 'Completado', failed: 'Fallido' })[status] || status;
-}
-
-async function login() {
-    authenticating.value = true;
-    error.value = '';
-    try {
-        const response = await api.post('/login', { username: username.value, password: password.value });
-        if (response.data.user.role !== 'developer') {
-            api.defaults.headers.common.Authorization = `Bearer ${response.data.token}`;
-            try { await api.post('/logout'); } catch { /* The temporary token will expire normally. */ }
-            delete api.defaults.headers.common.Authorization;
-            throw new Error('Esta cuenta no tiene acceso de desarrollador.');
-        }
-        token.value = response.data.token;
-        user.value = response.data.user;
-        localStorage.setItem('melodia_developer_token', token.value);
-        applyToken();
-        password.value = '';
-        await refresh();
-        startPolling();
-    } catch (exception) {
-        token.value = '';
-        localStorage.removeItem('melodia_developer_token');
-        error.value = message(exception, exception.message || 'No se pudo iniciar sesion.');
-    } finally {
-        authenticating.value = false;
-    }
-}
-
-async function verifySession() {
-    applyToken();
-    try {
-        const response = await api.get('/me');
-        if (response.data.user.role !== 'developer') throw new Error('forbidden');
-        user.value = response.data.user;
-        await refresh();
-        startPolling();
-    } catch {
-        logout(false);
-    }
-}
-
-async function logout(request = true) {
-    stopPolling();
-    if (request) {
-        try { await api.post('/logout'); } catch { /* Local logout still applies. */ }
-    }
-    token.value = '';
-    user.value = null;
-    overview.value = null;
-    jobs.value = [];
-    localStorage.removeItem('melodia_developer_token');
-    applyToken();
 }
 
 async function refresh(silent = false) {
@@ -202,8 +140,9 @@ function stopPolling() {
     refreshTimer = null;
 }
 
-onMounted(() => {
-    if (token.value) verifySession();
+onMounted(async () => {
+    await refresh();
+    startPolling();
 });
 onBeforeUnmount(stopPolling);
 </script>
@@ -216,28 +155,13 @@ onBeforeUnmount(stopPolling);
                     <span class="grid size-9 place-items-center rounded-md bg-[#2b7b80]"><ShieldCheck :size="19" /></span>
                     <div><p class="text-sm font-bold">Consola del sistema</p><p class="text-xs text-[#b9c5c9]">Radio Melodia</p></div>
                 </div>
-                <div v-if="user" class="flex items-center gap-2">
-                    <span class="hidden text-xs text-[#cbd5d8] sm:inline">{{ user.email }}</span>
+                <div class="flex items-center gap-2">
                     <button class="admin-icon" title="Actualizar" :disabled="loading" @click="refresh()"><RefreshCw :size="17" :class="{ 'animate-spin': loading }" /></button>
-                    <button class="admin-icon" title="Cerrar sesion" @click="logout()"><LogOut :size="17" /></button>
                 </div>
             </div>
         </header>
 
-        <div v-if="!user" class="mx-auto grid min-h-[calc(100vh-65px)] max-w-md place-items-center px-4">
-            <form class="panel w-full p-6" @submit.prevent="login">
-                <LockKeyhole :size="28" class="mb-4 text-[#176b72]" />
-                <h1 class="text-xl font-bold">Acceso de desarrollador</h1>
-                <div class="mt-5 space-y-4">
-                    <label class="field-label">Usuario<input v-model="username" class="field" required autocomplete="username"></label>
-                    <label class="field-label">Contrasena<input v-model="password" class="field" type="password" required autocomplete="current-password"></label>
-                    <p v-if="error" class="alert-error">{{ error }}</p>
-                    <button class="primary-button w-full" :disabled="authenticating"><LoaderCircle v-if="authenticating" :size="17" class="animate-spin" />{{ authenticating ? 'Verificando...' : 'Ingresar' }}</button>
-                </div>
-            </form>
-        </div>
-
-        <div v-else class="mx-auto max-w-[1280px] px-4 py-6 sm:px-6">
+        <div class="mx-auto max-w-[1280px] px-4 py-6 sm:px-6">
             <div v-if="error || notice" class="mb-4 space-y-2">
                 <p v-if="error" class="alert-error">{{ error }}</p>
                 <p v-if="notice" class="alert-success">{{ notice }}</p>

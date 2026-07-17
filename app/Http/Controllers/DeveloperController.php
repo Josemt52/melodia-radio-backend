@@ -86,7 +86,7 @@ class DeveloperController extends Controller
             $job = $this->archives->create(
                 $data['date'],
                 (bool) ($data['delete_after_upload'] ?? false),
-                (int) $request->user()->id
+                0
             );
         } catch (\InvalidArgumentException|\DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);

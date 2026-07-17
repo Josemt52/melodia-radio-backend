@@ -2,10 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\User;
 use App\Services\GoogleDriveService;
 use Illuminate\Support\Facades\File;
-use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class DeveloperPanelTest extends TestCase
@@ -41,18 +39,14 @@ class DeveloperPanelTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_regular_admin_cannot_open_developer_api(): void
+    public function test_hidden_panel_route_is_available_without_login(): void
     {
-        Sanctum::actingAs(new User(['role' => 'admin', 'is_active' => true]));
-
-        $this->getJson('/api/developer/overview')->assertForbidden();
+        $this->get('/'.config('developer.panel_path'))->assertOk();
     }
 
-    public function test_developer_can_inspect_local_recording_storage(): void
+    public function test_panel_can_inspect_local_recording_storage_without_login(): void
     {
-        Sanctum::actingAs(new User(['role' => 'developer', 'is_active' => true]));
-
-        $this->getJson('/api/developer/overview')
+        $this->getJson('/api/'.config('developer.api_path').'/overview')
             ->assertOk()
             ->assertJsonPath('days', 1)
             ->assertJsonPath('total_files', 1)
@@ -63,9 +57,7 @@ class DeveloperPanelTest extends TestCase
 
     public function test_archive_is_not_queued_until_drive_is_configured(): void
     {
-        Sanctum::actingAs(new User(['role' => 'developer', 'is_active' => true]));
-
-        $this->postJson('/api/developer/archives', [
+        $this->postJson('/api/'.config('developer.api_path').'/archives', [
             'date' => '2026-07-16',
             'delete_after_upload' => false,
         ])->assertUnprocessable()

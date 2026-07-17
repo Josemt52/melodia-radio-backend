@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'panel_path' => '_melodia-control-8f3d71c2',
+    'api_path' => '_melodia-control-8f3d71c2',
     'archive_path' => env('RADIO_ARCHIVE_PATH') ?: storage_path('app/archives'),
     'archive_job_path' => env('RADIO_ARCHIVE_JOB_PATH') ?: storage_path('app/archive-jobs'),
     'tar_binary' => env('RADIO_TAR_BINARY', 'tar'),
