@@ -12,7 +12,7 @@
 
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body>
+    <body data-panel="{{ request()->routeIs('developer.panel') ? 'developer' : 'recordings' }}">
         <div id="app"></div>
     </body>
 </html>

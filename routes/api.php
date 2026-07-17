@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DeveloperController;
 use App\Http\Controllers\RadioController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,4 +23,11 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('/exports/{id}/download', [RadioController::class, 'downloadExportJob'])
         ->where('id', '[a-f0-9]{32}')
         ->name('api.exports.download');
+});
+
+Route::prefix('developer')->middleware(['auth:sanctum', 'developer', 'throttle:60,1'])->group(function () {
+    Route::get('/overview', [DeveloperController::class, 'overview']);
+    Route::post('/drive/test', [DeveloperController::class, 'testDrive']);
+    Route::post('/archives', [DeveloperController::class, 'createArchive']);
+    Route::get('/archives', [DeveloperController::class, 'archives']);
 });

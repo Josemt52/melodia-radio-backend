@@ -24,6 +24,11 @@ class CreatePanelUser extends Command
         $password = (string) ($this->option('password') ?: Str::password(18));
         $role = (string) $this->option('role');
 
+        if (!in_array($role, ['operator', 'admin', 'developer'], true)) {
+            $this->error('Role must be operator, admin, or developer.');
+            return self::FAILURE;
+        }
+
         $user = User::updateOrCreate(
             ['email' => $email],
             [
