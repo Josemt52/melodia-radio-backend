@@ -8,6 +8,7 @@ import {
     Clock3,
     Download,
     Headphones,
+    HardDrive,
     ListMusic,
     LoaderCircle,
     LogOut,
@@ -79,6 +80,7 @@ const notice = ref('');
 let refreshTimer = null;
 
 const api = axios.create({ baseURL: '/api', headers: { Accept: 'application/json' } });
+const storagePanelUrl = document.querySelector('meta[name="storage-panel-url"]')?.content || '/';
 
 const selectedSlot = computed(() => hours.value.find((item) => item.hour === selectedHour.value) || null);
 const slotStartSeconds = computed(() => {
@@ -536,6 +538,9 @@ onBeforeUnmount(() => {
 
                 <div v-if="token" class="flex items-center gap-2">
                     <span class="hidden text-sm text-[#52616a] sm:inline">{{ currentUser?.username || currentUser?.email }}</span>
+                    <a class="icon-button" :href="storagePanelUrl" title="Almacenamiento y respaldos">
+                        <HardDrive :size="18" />
+                    </a>
                     <button class="icon-button" title="Actualizar grabaciones" :disabled="loadingHours" @click="loadHours()">
                         <RefreshCw :size="18" :class="{ 'animate-spin': loadingHours }" />
                     </button>
