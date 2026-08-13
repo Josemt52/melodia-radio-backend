@@ -18,10 +18,26 @@ class GoogleDriveService
     public function status(): array
     {
         try {
+            $mode = $this->settings->driveAuthMode();
+            if ($mode === DeveloperSettingsService::AUTH_OAUTH) {
+                $credentials = $this->oauthCredentials(false);
+
+                return [
+                    'configured' => $credentials !== null
+                        && (bool) $this->settings->get('google_drive_oauth_refresh_token')
+                        && (bool) $this->settings->get('google_drive_oauth_folder_id'),
+                    'mode' => $mode,
+                    'account' => $this->settings->get('google_drive_oauth_email'),
+                    'folder_id' => $this->settings->get('google_drive_oauth_folder_id') ? 'Configurada' : null,
+                    'error' => null,
+                ];
+            }
+
             $credentials = $this->credentials(false);
         } catch (\Throwable $exception) {
             return [
                 'configured' => false,
+                'mode' => $this->settings->driveAuthMode(),
                 'account' => null,
                 'folder_id' => null,
                 'error' => $exception->getMessage(),
@@ -30,6 +46,7 @@ class GoogleDriveService
 
         return [
             'configured' => $credentials !== null && (bool) $this->settings->get('google_drive_folder_id'),
+            'mode' => DeveloperSettingsService::AUTH_SERVICE_ACCOUNT,
             'account' => $credentials['client_email'] ?? null,
             'folder_id' => $this->settings->get('google_drive_folder_id') ? 'Configurada' : null,
             'error' => null,
@@ -45,6 +62,61 @@ class GoogleDriveService
         ])->throw()->json();
 
         return ['connected' => true, 'folder_name' => $response['name'] ?? 'Google Drive'];
+    }
+
+    public function oauthAuthorizationUrl(string $state): string
+    {
+        $credentials = $this->oauthCredentials();
+
+        return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([
+            'client_id' => $credentials['client_id'],
+            'redirect_uri' => $this->oauthRedirectUri(),
+            'response_type' => 'code',
+            'scope' => 'openid email https://www.googleapis.com/auth/drive.file',
+            'access_type' => 'offline',
+            'include_granted_scopes' => 'true',
+            'prompt' => 'consent',
+            'state' => $state,
+        ], '', '&', PHP_QUERY_RFC3986);
+    }
+
+    public function connectOAuth(string $code): array
+    {
+        if ($code === '') {
+            throw new \RuntimeException('Google no devolvio el codigo de autorizacion.');
+        }
+
+        $credentials = $this->oauthCredentials();
+        $tokens = Http::asForm()->timeout(30)->post($credentials['token_uri'], [
+            'code' => $code,
+            'client_id' => $credentials['client_id'],
+            'client_secret' => $credentials['client_secret'],
+            'redirect_uri' => $this->oauthRedirectUri(),
+            'grant_type' => 'authorization_code',
+        ])->throw()->json();
+
+        if (empty($tokens['access_token']) || empty($tokens['refresh_token'])) {
+            throw new \RuntimeException('Google no entrego acceso permanente. Vuelve a autorizar la cuenta.');
+        }
+
+        $accessToken = $tokens['access_token'];
+        $profile = Http::acceptJson()
+            ->withToken($accessToken)
+            ->timeout(30)
+            ->get('https://openidconnect.googleapis.com/v1/userinfo')
+            ->throw()
+            ->json();
+        $folder = $this->ensureOAuthFolder($accessToken);
+
+        $this->settings->put('google_drive_oauth_refresh_token', $tokens['refresh_token'], true);
+        $this->settings->put('google_drive_oauth_folder_id', $folder['id']);
+        $this->settings->put('google_drive_oauth_email', $profile['email'] ?? null);
+        $this->settings->put('google_drive_auth_mode', DeveloperSettingsService::AUTH_OAUTH);
+
+        return [
+            'account' => $profile['email'] ?? null,
+            'folder_name' => $folder['name'] ?? 'melodia-backups',
+        ];
     }
 
     public function upload(string $path, string $filename): array
@@ -135,6 +207,15 @@ class GoogleDriveService
 
     private function accessToken(): string
     {
+        if ($this->settings->driveAuthMode() === DeveloperSettingsService::AUTH_OAUTH) {
+            return $this->oauthAccessToken();
+        }
+
+        return $this->serviceAccountAccessToken();
+    }
+
+    private function serviceAccountAccessToken(): string
+    {
         $credentials = $this->credentials();
         $now = time();
         $header = $this->base64Url(json_encode(['alg' => 'RS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
@@ -164,6 +245,28 @@ class GoogleDriveService
         return $response['access_token'];
     }
 
+    private function oauthAccessToken(): string
+    {
+        $credentials = $this->oauthCredentials();
+        $refreshToken = $this->settings->get('google_drive_oauth_refresh_token');
+        if (! $refreshToken) {
+            throw new \RuntimeException('Falta conectar la cuenta de Google Drive.');
+        }
+
+        $response = Http::asForm()->timeout(30)->post($credentials['token_uri'], [
+            'client_id' => $credentials['client_id'],
+            'client_secret' => $credentials['client_secret'],
+            'refresh_token' => $refreshToken,
+            'grant_type' => 'refresh_token',
+        ])->throw()->json();
+
+        if (empty($response['access_token'])) {
+            throw new \RuntimeException('Google Drive no pudo renovar el acceso.');
+        }
+
+        return $response['access_token'];
+    }
+
     private function credentials(bool $required = true): ?array
     {
         $json = $this->settings->get('google_drive_credentials');
@@ -183,10 +286,74 @@ class GoogleDriveService
         return $credentials;
     }
 
+    private function oauthCredentials(bool $required = true): ?array
+    {
+        $json = $this->settings->get('google_drive_oauth_credentials');
+        if (! $json) {
+            if ($required) {
+                throw new \RuntimeException('Falta cargar la credencial OAuth de Google Drive.');
+            }
+
+            return null;
+        }
+
+        $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        $credentials = $decoded['web'] ?? null;
+        if (
+            ! is_array($credentials)
+            || empty($credentials['client_id'])
+            || empty($credentials['client_secret'])
+            || empty($credentials['token_uri'])
+        ) {
+            throw new \RuntimeException('La credencial OAuth debe ser de tipo aplicacion web.');
+        }
+
+        return $credentials;
+    }
+
     private function folderId(): string
     {
+        if ($this->settings->driveAuthMode() === DeveloperSettingsService::AUTH_OAUTH) {
+            return $this->settings->get('google_drive_oauth_folder_id')
+                ?: throw new \RuntimeException('Falta conectar la carpeta de Google Drive.');
+        }
+
         return $this->settings->get('google_drive_folder_id')
             ?: throw new \RuntimeException('Falta configurar el ID de carpeta de Google Drive.');
+    }
+
+    private function ensureOAuthFolder(string $accessToken): array
+    {
+        $folderId = $this->settings->get('google_drive_oauth_folder_id');
+        if ($folderId) {
+            $existing = Http::acceptJson()
+                ->withToken($accessToken)
+                ->timeout(30)
+                ->get("https://www.googleapis.com/drive/v3/files/{$folderId}", [
+                    'fields' => 'id,name,mimeType',
+                ]);
+
+            if ($existing->successful()) {
+                return $existing->json();
+            }
+        }
+
+        return Http::acceptJson()
+            ->asJson()
+            ->withToken($accessToken)
+            ->timeout(30)
+            ->post('https://www.googleapis.com/drive/v3/files?fields=id,name', [
+                'name' => 'melodia-backups',
+                'mimeType' => 'application/vnd.google-apps.folder',
+                'parents' => ['root'],
+            ])
+            ->throw()
+            ->json();
+    }
+
+    private function oauthRedirectUri(): string
+    {
+        return route('developer.drive.oauth.callback');
     }
 
     private function base64Url(string $value): string

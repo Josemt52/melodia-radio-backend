@@ -34,6 +34,12 @@ class DeveloperPanelTest extends TestCase
             'chunk_bytes' => 268435456,
             'parts' => 1,
         ]);
+        $drive->shouldReceive('oauthAuthorizationUrl')
+            ->byDefault()
+            ->andReturn('https://accounts.google.com/o/oauth2/v2/auth?state=test');
+        $drive->shouldReceive('connectOAuth')
+            ->byDefault()
+            ->andReturn(['account' => 'owner@example.com', 'folder_name' => 'melodia-backups']);
         $this->app->instance(GoogleDriveService::class, $drive);
     }
 
@@ -46,6 +52,26 @@ class DeveloperPanelTest extends TestCase
     public function test_hidden_panel_route_is_available_without_login(): void
     {
         $this->get('/'.config('developer.panel_path'))->assertOk();
+    }
+
+    public function test_drive_oauth_redirect_stores_state_and_opens_google(): void
+    {
+        $response = $this->get(route('developer.drive.oauth.redirect'));
+
+        $response->assertRedirectContains('accounts.google.com');
+        $this->assertNotEmpty(session('google_drive_oauth_state'));
+    }
+
+    public function test_drive_oauth_callback_connects_the_account(): void
+    {
+        $this->withSession(['google_drive_oauth_state' => 'valid-state'])
+            ->get(route('developer.drive.oauth.callback', [
+                'state' => 'valid-state',
+                'code' => 'authorization-code',
+            ]))
+            ->assertRedirect(route('developer.panel', [
+                'drive_connected' => 'owner@example.com',
+            ]));
     }
 
     public function test_panel_can_inspect_local_recording_storage_without_login(): void

@@ -7,6 +7,8 @@ import {
     Cloud,
     Database,
     HardDrive,
+    KeyRound,
+    Link2,
     LoaderCircle,
     RefreshCw,
     Server,
@@ -16,8 +18,19 @@ import {
 
 const overview = ref(null);
 const jobs = ref([]);
-const driveSettings = ref({ folder_id: '', credentials_configured: false, service_account_email: null });
-const credentialsFile = ref(null);
+const driveSettings = ref({
+    auth_mode: 'oauth',
+    folder_id: '',
+    credentials_configured: false,
+    service_account_email: null,
+    oauth_credentials_configured: false,
+    oauth_connected: false,
+    oauth_account: null,
+    oauth_redirect_uri: '',
+    oauth_connect_url: null,
+});
+const serviceCredentialsFile = ref(null);
+const oauthCredentialsFile = ref(null);
 const selectedDate = ref('');
 const deleteAfterUpload = ref(false);
 const loading = ref(false);
@@ -81,19 +94,31 @@ async function saveDriveSettings() {
     notice.value = '';
 
     const form = new FormData();
-    form.append('folder_id', driveSettings.value.folder_id);
-    if (credentialsFile.value) form.append('credentials', credentialsFile.value);
+    form.append('auth_mode', driveSettings.value.auth_mode);
+    if (driveSettings.value.auth_mode === 'oauth') {
+        if (oauthCredentialsFile.value) form.append('oauth_credentials', oauthCredentialsFile.value);
+    } else {
+        form.append('folder_id', driveSettings.value.folder_id);
+        if (serviceCredentialsFile.value) form.append('service_account_credentials', serviceCredentialsFile.value);
+    }
 
     try {
         const response = await api.post('/settings', form);
         driveSettings.value = response.data;
-        credentialsFile.value = null;
+        serviceCredentialsFile.value = null;
+        oauthCredentialsFile.value = null;
         notice.value = 'Configuracion de Google Drive guardada.';
         await refresh(true);
     } catch (exception) {
         error.value = message(exception, 'No se pudo guardar la configuracion.');
     } finally {
         savingSettings.value = false;
+    }
+}
+
+function connectGoogle() {
+    if (driveSettings.value.oauth_connect_url) {
+        window.location.assign(driveSettings.value.oauth_connect_url);
     }
 }
 
@@ -142,6 +167,16 @@ function stopPolling() {
 }
 
 onMounted(async () => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.has('drive_connected')) {
+        notice.value = `Cuenta conectada: ${query.get('drive_connected')}.`;
+    } else if (query.has('drive_error')) {
+        error.value = query.get('drive_error');
+    }
+    if (query.has('drive_connected') || query.has('drive_error')) {
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+
     await refresh();
     startPolling();
 });
@@ -200,13 +235,31 @@ onBeforeUnmount(stopPolling);
                         <section class="panel">
                             <div class="panel-heading"><div class="flex items-center gap-2"><Cloud :size="17" /><h2>Google Drive</h2></div><CheckCircle2 v-if="overview.drive.configured" :size="18" class="text-[#287246]" /></div>
                             <form class="space-y-4 p-4" @submit.prevent="saveDriveSettings">
-                                <label class="field-label">ID de carpeta en unidad compartida<input v-model.trim="driveSettings.folder_id" class="field" required placeholder="1AbC..."></label>
-                                <label class="field-label">Credencial de cuenta de servicio
-                                    <input class="file-field" type="file" accept="application/json,.json" :required="!driveSettings.credentials_configured" @change="credentialsFile = $event.target.files[0] || null">
-                                    <span v-if="driveSettings.service_account_email" class="mt-1 block break-all text-[11px] font-normal text-[#687780]">{{ driveSettings.service_account_email }}</span>
+                                <label class="field-label">Destino
+                                    <select v-model="driveSettings.auth_mode" class="field">
+                                        <option value="oauth">Mi unidad</option>
+                                        <option value="service_account">Unidad compartida</option>
+                                    </select>
                                 </label>
+                                <template v-if="driveSettings.auth_mode === 'oauth'">
+                                    <label class="field-label">URL de redireccion
+                                        <input :value="driveSettings.oauth_redirect_uri" class="field text-xs" readonly>
+                                    </label>
+                                    <label class="field-label">Cliente OAuth de aplicacion web
+                                        <input class="file-field" type="file" accept="application/json,.json" :required="!driveSettings.oauth_credentials_configured" @change="oauthCredentialsFile = $event.target.files[0] || null">
+                                        <span v-if="driveSettings.oauth_account" class="mt-1 block break-all text-[11px] font-normal text-[#287246]">{{ driveSettings.oauth_account }}</span>
+                                    </label>
+                                </template>
+                                <template v-else>
+                                    <label class="field-label">ID de carpeta en unidad compartida<input v-model.trim="driveSettings.folder_id" class="field" required placeholder="1AbC..."></label>
+                                    <label class="field-label">Credencial de cuenta de servicio
+                                        <input class="file-field" type="file" accept="application/json,.json" :required="!driveSettings.credentials_configured" @change="serviceCredentialsFile = $event.target.files[0] || null">
+                                        <span v-if="driveSettings.service_account_email" class="mt-1 block break-all text-[11px] font-normal text-[#687780]">{{ driveSettings.service_account_email }}</span>
+                                    </label>
+                                </template>
                                 <div class="rounded-md border border-[#d7dde0] bg-[#f7f9f9] px-3 py-2"><span class="block text-xs text-[#687780]">Transferencia</span><strong class="text-sm">Division automatica</strong><small class="mt-1 block text-xs text-[#687780]">Bloques de 256 MB a 1 GB</small></div>
-                                <button class="primary-button w-full" :disabled="savingSettings"><LoaderCircle v-if="savingSettings" :size="16" class="animate-spin" /><Cloud v-else :size="16" />Guardar configuracion</button>
+                                <button class="primary-button w-full" :disabled="savingSettings"><LoaderCircle v-if="savingSettings" :size="16" class="animate-spin" /><KeyRound v-else :size="16" />Guardar configuracion</button>
+                                <button v-if="driveSettings.auth_mode === 'oauth'" class="secondary-button w-full" type="button" :disabled="!driveSettings.oauth_connect_url" @click="connectGoogle"><Link2 :size="16" />{{ driveSettings.oauth_connected ? 'Reconectar cuenta' : 'Conectar cuenta Google' }}</button>
                                 <button class="secondary-button w-full" type="button" :disabled="!overview.drive.configured || testingDrive" @click="testDrive"><LoaderCircle v-if="testingDrive" :size="16" class="animate-spin" /><CheckCircle2 v-else :size="16" />Probar conexion</button>
                             </form>
                         </section>

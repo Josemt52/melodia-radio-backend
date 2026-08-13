@@ -7,6 +7,10 @@ use Illuminate\Support\Facades\Crypt;
 
 class DeveloperSettingsService
 {
+    public const AUTH_OAUTH = 'oauth';
+
+    public const AUTH_SERVICE_ACCOUNT = 'service_account';
+
     public function get(string $key, mixed $default = null): mixed
     {
         $setting = SystemSetting::query()->where('key', $key)->first();
@@ -32,13 +36,41 @@ class DeveloperSettingsService
 
     public function driveSettings(): array
     {
-        $credentials = $this->get('google_drive_credentials');
-        $decoded = $credentials ? json_decode($credentials, true) : null;
+        $serviceCredentials = $this->get('google_drive_credentials');
+        $serviceDecoded = $serviceCredentials ? json_decode($serviceCredentials, true) : null;
+        $oauthCredentials = $this->get('google_drive_oauth_credentials');
+        $oauthDecoded = $oauthCredentials ? json_decode($oauthCredentials, true) : null;
+        $oauthConnected = (bool) $this->get('google_drive_oauth_refresh_token')
+            && (bool) $this->get('google_drive_oauth_folder_id');
 
         return [
+            'auth_mode' => $this->driveAuthMode(),
             'folder_id' => (string) $this->get('google_drive_folder_id', ''),
-            'credentials_configured' => is_array($decoded),
-            'service_account_email' => $decoded['client_email'] ?? null,
+            'credentials_configured' => is_array($serviceDecoded),
+            'service_account_email' => $serviceDecoded['client_email'] ?? null,
+            'oauth_credentials_configured' => isset($oauthDecoded['web']['client_id']),
+            'oauth_connected' => $oauthConnected,
+            'oauth_account' => $this->get('google_drive_oauth_email'),
+            'oauth_redirect_uri' => route('developer.drive.oauth.callback'),
+            'oauth_connect_url' => isset($oauthDecoded['web']['client_id'])
+                ? route('developer.drive.oauth.redirect')
+                : null,
         ];
+    }
+
+    public function driveAuthMode(): string
+    {
+        $mode = $this->get('google_drive_auth_mode');
+        if (in_array($mode, [self::AUTH_OAUTH, self::AUTH_SERVICE_ACCOUNT], true)) {
+            return $mode;
+        }
+
+        if ($this->get('google_drive_oauth_refresh_token')) {
+            return self::AUTH_OAUTH;
+        }
+
+        return $this->get('google_drive_credentials')
+            ? self::AUTH_SERVICE_ACCOUNT
+            : self::AUTH_OAUTH;
     }
 }
