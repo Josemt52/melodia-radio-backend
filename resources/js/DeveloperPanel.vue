@@ -16,7 +16,7 @@ import {
 
 const overview = ref(null);
 const jobs = ref([]);
-const driveSettings = ref({ folder_id: '', upload_chunk_mb: 8, credentials_configured: false, service_account_email: null });
+const driveSettings = ref({ folder_id: '', upload_chunk_mb: 256, credentials_configured: false, service_account_email: null });
 const credentialsFile = ref(null);
 const selectedDate = ref('');
 const deleteAfterUpload = ref(false);
@@ -205,7 +205,7 @@ onBeforeUnmount(stopPolling);
                                 </label>
                                 <label class="field-label">Bloque de carga
                                     <select v-model.number="driveSettings.upload_chunk_mb" class="field">
-                                        <option :value="4">4 MB</option><option :value="8">8 MB</option><option :value="16">16 MB</option><option :value="32">32 MB</option><option :value="64">64 MB</option>
+                                        <option :value="256">256 MB</option><option :value="512">512 MB</option><option :value="1024">1 GB</option>
                                     </select>
                                 </label>
                                 <button class="primary-button w-full" :disabled="savingSettings"><LoaderCircle v-if="savingSettings" :size="16" class="animate-spin" /><Cloud v-else :size="16" />Guardar configuracion</button>

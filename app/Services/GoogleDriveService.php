@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use GuzzleHttp\Psr7\LimitStream;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 
@@ -70,18 +72,15 @@ class GoogleDriveService
 
         $offset = 0;
         $result = null;
-        $chunkSize = max(1, (int) $this->settings->get('google_drive_upload_chunk_mb', config('developer.default_upload_chunk_mb'))) * 1048576;
+        $chunkSize = $this->settings->uploadChunkMb() * 1048576;
         $chunkSize -= $chunkSize % 262144;
+        $stream = Utils::streamFor($handle);
 
         try {
             while ($offset < $size) {
                 $length = min($chunkSize, $size - $offset);
-                $chunk = fread($handle, $length);
-                if ($chunk === false || strlen($chunk) !== $length) {
-                    throw new \RuntimeException('No se pudo leer completamente el respaldo.');
-                }
-
                 $end = $offset + $length - 1;
+                $chunk = new LimitStream($stream, $length, $offset);
                 $response = $client->timeout(300)
                     ->withHeaders([
                         'Content-Length' => (string) $length,
@@ -100,7 +99,7 @@ class GoogleDriveService
                 $offset += $length;
             }
         } finally {
-            fclose($handle);
+            $stream->close();
         }
 
         if (! $result || empty($result['id'])) {
