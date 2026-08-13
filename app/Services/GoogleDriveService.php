@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\Http;
 
 class GoogleDriveService
 {
+    private const MEGABYTE = 1048576;
+
+    private const GIGABYTE = 1073741824;
+
     public function __construct(private DeveloperSettingsService $settings) {}
 
     public function status(): array
@@ -72,8 +76,7 @@ class GoogleDriveService
 
         $offset = 0;
         $result = null;
-        $chunkSize = $this->settings->uploadChunkMb() * 1048576;
-        $chunkSize -= $chunkSize % 262144;
+        $chunkSize = $this->uploadPlan($size)['chunk_bytes'];
         $stream = Utils::streamFor($handle);
 
         try {
@@ -107,6 +110,22 @@ class GoogleDriveService
         }
 
         return ['id' => $result['id'], 'name' => $result['name'] ?? $filename, 'size' => $size];
+    }
+
+    public function uploadPlan(int $size): array
+    {
+        $size = max(0, $size);
+        $chunkMb = match (true) {
+            $size <= 2 * self::GIGABYTE => 256,
+            $size <= 8 * self::GIGABYTE => 512,
+            default => 1024,
+        };
+        $chunkBytes = $chunkMb * self::MEGABYTE;
+
+        return [
+            'chunk_bytes' => $chunkBytes,
+            'parts' => $size > 0 ? (int) ceil($size / $chunkBytes) : 0,
+        ];
     }
 
     private function client(): PendingRequest

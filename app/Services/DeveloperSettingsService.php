@@ -37,18 +37,8 @@ class DeveloperSettingsService
 
         return [
             'folder_id' => (string) $this->get('google_drive_folder_id', ''),
-            'upload_chunk_mb' => $this->uploadChunkMb(),
             'credentials_configured' => is_array($decoded),
             'service_account_email' => $decoded['client_email'] ?? null,
         ];
-    }
-
-    public function uploadChunkMb(): int
-    {
-        $default = (int) config('developer.default_upload_chunk_mb');
-        $configured = (int) $this->get('google_drive_upload_chunk_mb', $default);
-        $options = array_map('intval', config('developer.upload_chunk_options_mb', [$default]));
-
-        return in_array($configured, $options, true) ? $configured : $default;
     }
 }

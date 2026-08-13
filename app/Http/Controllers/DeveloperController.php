@@ -6,7 +6,6 @@ use App\Services\DeveloperSettingsService;
 use App\Services\GoogleDriveService;
 use App\Services\RecordingArchiveService;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class DeveloperController extends Controller
 {
@@ -39,11 +38,6 @@ class DeveloperController extends Controller
     {
         $data = $request->validate([
             'folder_id' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'upload_chunk_mb' => [
-                'required',
-                'integer',
-                Rule::in(config('developer.upload_chunk_options_mb')),
-            ],
             'credentials' => ['nullable', 'file', 'max:128'],
         ]);
 
@@ -70,7 +64,6 @@ class DeveloperController extends Controller
         }
 
         $this->settings->put('google_drive_folder_id', $data['folder_id']);
-        $this->settings->put('google_drive_upload_chunk_mb', $data['upload_chunk_mb']);
 
         return response()->json($this->settings->driveSettings());
     }

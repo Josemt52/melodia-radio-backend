@@ -16,7 +16,7 @@ import {
 
 const overview = ref(null);
 const jobs = ref([]);
-const driveSettings = ref({ folder_id: '', upload_chunk_mb: 256, credentials_configured: false, service_account_email: null });
+const driveSettings = ref({ folder_id: '', credentials_configured: false, service_account_email: null });
 const credentialsFile = ref(null);
 const selectedDate = ref('');
 const deleteAfterUpload = ref(false);
@@ -38,6 +38,8 @@ const diskUsed = computed(() => overview.value
 const diskPercent = computed(() => overview.value?.disk_total_bytes
     ? Math.round((diskUsed.value / overview.value.disk_total_bytes) * 100)
     : 0);
+const archivableDates = computed(() => overview.value?.dates.filter((item) => item.archivable) || []);
+const selectedRecording = computed(() => archivableDates.value.find((item) => item.date === selectedDate.value) || null);
 
 function formatBytes(value) {
     const bytes = Number(value || 0);
@@ -65,7 +67,7 @@ async function refresh(silent = false) {
         overview.value = overviewResponse.data;
         jobs.value = jobsResponse.data.jobs;
         if (!silent) driveSettings.value = (await api.get('/settings')).data;
-        if (!selectedDate.value && overview.value.dates.length) selectedDate.value = overview.value.dates[0].date;
+        if (!selectedRecording.value) selectedDate.value = archivableDates.value[0]?.date || '';
     } catch (exception) {
         error.value = message(exception, 'No se pudo actualizar el panel.');
     } finally {
@@ -80,7 +82,6 @@ async function saveDriveSettings() {
 
     const form = new FormData();
     form.append('folder_id', driveSettings.value.folder_id);
-    form.append('upload_chunk_mb', driveSettings.value.upload_chunk_mb);
     if (credentialsFile.value) form.append('credentials', credentialsFile.value);
 
     try {
@@ -182,13 +183,14 @@ onBeforeUnmount(stopPolling);
                         <div class="panel-heading"><div class="flex items-center gap-2"><Server :size="17" /><h2>Grabaciones en la VPS</h2></div><span class="counter">{{ overview.dates.length }}</span></div>
                         <div class="overflow-x-auto">
                             <table class="admin-table">
-                                <thead><tr><th>Fecha UTC</th><th>Archivos</th><th>Tamano</th><th></th></tr></thead>
+                                <thead><tr><th>Fecha UTC</th><th>Archivos</th><th>Tamano</th><th>Subida estimada</th><th></th></tr></thead>
                                 <tbody>
                                     <tr v-for="item in overview.dates" :key="item.date">
-                                        <td class="font-semibold">{{ item.date }}</td><td>{{ item.files.toLocaleString() }}</td><td>{{ formatBytes(item.bytes) }}</td>
-                                        <td class="text-right"><button class="secondary-button" @click="selectedDate = item.date">Seleccionar</button></td>
+                                        <td class="font-semibold">{{ item.date }}<small v-if="!item.archivable" class="mt-1 block font-normal text-[#a05b20]">En curso</small></td><td>{{ item.files.toLocaleString() }}</td><td>{{ formatBytes(item.bytes) }}</td>
+                                        <td><span class="font-semibold">{{ item.upload.parts }} bloques</span><small class="mt-1 block text-xs text-[#687780]">Hasta {{ formatBytes(item.upload.chunk_bytes) }} cada uno</small></td>
+                                        <td class="text-right"><button class="secondary-button" :disabled="!item.archivable" @click="selectedDate = item.date">Seleccionar</button></td>
                                     </tr>
-                                    <tr v-if="!overview.dates.length"><td colspan="4" class="py-10 text-center text-[#75848a]">No hay dias completos para archivar.</td></tr>
+                                    <tr v-if="!overview.dates.length"><td colspan="5" class="py-10 text-center text-[#75848a]">No hay grabaciones disponibles.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -203,11 +205,7 @@ onBeforeUnmount(stopPolling);
                                     <input class="file-field" type="file" accept="application/json,.json" :required="!driveSettings.credentials_configured" @change="credentialsFile = $event.target.files[0] || null">
                                     <span v-if="driveSettings.service_account_email" class="mt-1 block break-all text-[11px] font-normal text-[#687780]">{{ driveSettings.service_account_email }}</span>
                                 </label>
-                                <label class="field-label">Bloque de carga
-                                    <select v-model.number="driveSettings.upload_chunk_mb" class="field">
-                                        <option :value="256">256 MB</option><option :value="512">512 MB</option><option :value="1024">1 GB</option>
-                                    </select>
-                                </label>
+                                <div class="rounded-md border border-[#d7dde0] bg-[#f7f9f9] px-3 py-2"><span class="block text-xs text-[#687780]">Transferencia</span><strong class="text-sm">Division automatica</strong><small class="mt-1 block text-xs text-[#687780]">Bloques de 256 MB a 1 GB</small></div>
                                 <button class="primary-button w-full" :disabled="savingSettings"><LoaderCircle v-if="savingSettings" :size="16" class="animate-spin" /><Cloud v-else :size="16" />Guardar configuracion</button>
                                 <button class="secondary-button w-full" type="button" :disabled="!overview.drive.configured || testingDrive" @click="testDrive"><LoaderCircle v-if="testingDrive" :size="16" class="animate-spin" /><CheckCircle2 v-else :size="16" />Probar conexion</button>
                             </form>
@@ -216,7 +214,8 @@ onBeforeUnmount(stopPolling);
                         <section class="panel">
                             <div class="panel-heading"><div class="flex items-center gap-2"><Archive :size="17" /><h2>Crear respaldo</h2></div></div>
                             <div class="p-4">
-                                <label class="field-label">Dia<select v-model="selectedDate" class="field"><option v-for="item in overview.dates" :key="item.date" :value="item.date">{{ item.date }} - {{ formatBytes(item.bytes) }}</option></select></label>
+                                <label class="field-label">Dia<select v-model="selectedDate" class="field"><option v-for="item in archivableDates" :key="item.date" :value="item.date">{{ item.date }} - {{ formatBytes(item.bytes) }}</option></select></label>
+                                <div v-if="selectedRecording" class="mt-3 rounded-md border border-[#d7dde0] bg-[#f7f9f9] px-3 py-2 text-sm"><strong>{{ selectedRecording.upload.parts }} bloques estimados</strong><small class="mt-1 block text-xs text-[#687780]">{{ formatBytes(selectedRecording.upload.chunk_bytes) }} maximo por bloque</small></div>
                                 <label class="mt-4 flex items-start gap-3 text-sm"><input v-model="deleteAfterUpload" type="checkbox" class="mt-1 size-4 accent-[#176b72]"><span><strong>Liberar espacio al terminar</strong><small class="mt-1 block text-xs text-[#687780]">El dia local se elimina solo cuando Drive confirma la carga.</small></span></label>
                                 <p v-if="deleteAfterUpload" class="mt-3 flex gap-2 rounded-md bg-[#fff4e6] p-3 text-xs text-[#7a4a13]"><TriangleAlert :size="16" class="shrink-0" />Esta accion elimina las grabaciones originales de la VPS.</p>
                                 <button class="primary-button mt-4 w-full" :disabled="!selectedDate || !overview.drive.configured || queueing" @click="queueArchive"><LoaderCircle v-if="queueing" :size="16" class="animate-spin" /><Archive v-else :size="16" />Agregar a la cola</button>

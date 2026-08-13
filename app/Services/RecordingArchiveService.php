@@ -16,6 +16,7 @@ class RecordingArchiveService
         $dates = [];
         $totalBytes = 0;
         $totalFiles = 0;
+        $currentRecordingDate = now(config('radio.recordings_timezone', 'UTC'))->format('Y-m-d');
 
         if (File::isDirectory($root)) {
             foreach (File::directories($root) as $directory) {
@@ -27,16 +28,26 @@ class RecordingArchiveService
                 $bytes = 0;
                 $files = 0;
                 foreach (File::allFiles($directory) as $file) {
-                    if (strtolower($file->getExtension()) !== 'mp3') {
+                    if (strtolower($file->getExtension()) !== 'mp3' || $file->getSize() <= 0) {
                         continue;
                     }
                     $bytes += $file->getSize();
                     $files++;
                 }
 
+                if ($files === 0) {
+                    continue;
+                }
+
                 $totalBytes += $bytes;
                 $totalFiles += $files;
-                $dates[] = ['date' => $date, 'files' => $files, 'bytes' => $bytes];
+                $dates[] = [
+                    'date' => $date,
+                    'files' => $files,
+                    'bytes' => $bytes,
+                    'archivable' => $date < $currentRecordingDate,
+                    'upload' => $this->drive->uploadPlan($bytes),
+                ];
             }
         }
 
@@ -59,6 +70,12 @@ class RecordingArchiveService
     {
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || ! File::isDirectory($this->sourcePath($date))) {
             throw new \InvalidArgumentException('El dia seleccionado no existe en el almacenamiento local.');
+        }
+        if ($date >= now(config('radio.recordings_timezone', 'UTC'))->format('Y-m-d')) {
+            throw new \DomainException('Solo se pueden archivar dias completos anteriores al actual.');
+        }
+        if (! $this->hasRecordings($date)) {
+            throw new \DomainException('El dia seleccionado no contiene grabaciones.');
         }
         if (! $this->drive->status()['configured']) {
             throw new \DomainException('Google Drive aun no esta configurado.');
@@ -184,6 +201,17 @@ class RecordingArchiveService
     private function sourcePath(string $date): string
     {
         return rtrim(config('radio.recordings_path'), DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$date;
+    }
+
+    private function hasRecordings(string $date): bool
+    {
+        foreach (File::allFiles($this->sourcePath($date)) as $file) {
+            if (strtolower($file->getExtension()) === 'mp3' && $file->getSize() > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function ensurePaths(): void
