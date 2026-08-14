@@ -128,6 +128,10 @@ class GoogleDriveService
 
         $client = $this->client();
         $size = filesize($path);
+        if ($size === false || $size <= 0) {
+            throw new \RuntimeException('El archivo de respaldo esta vacio o no se pudo medir.');
+        }
+
         $session = $client->withHeaders([
             'X-Upload-Content-Type' => 'application/gzip',
             'X-Upload-Content-Length' => (string) $size,
@@ -158,7 +162,7 @@ class GoogleDriveService
                 $end = $offset + $length - 1;
                 $chunk = new LimitStream($stream, $length, $offset);
                 $response = $client->timeout(300)
-                    ->withHeaders([
+                    ->replaceHeaders([
                         'Content-Length' => (string) $length,
                         'Content-Range' => "bytes {$offset}-{$end}/{$size}",
                     ])
