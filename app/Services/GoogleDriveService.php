@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Http;
 
 class GoogleDriveService
 {
+    private const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
     private const MEGABYTE = 1048576;
 
     private const GIGABYTE = 1073741824;
@@ -27,7 +29,7 @@ class GoogleDriveService
                         && (bool) $this->settings->get('google_drive_oauth_refresh_token')
                         && (bool) $this->settings->get('google_drive_oauth_folder_id'),
                     'mode' => $mode,
-                    'account' => $this->settings->get('google_drive_oauth_email'),
+                    'account' => $this->settings->get('google_drive_oauth_email') ?: 'Mi unidad',
                     'folder_id' => $this->settings->get('google_drive_oauth_folder_id') ? 'Configurada' : null,
                     'error' => null,
                 ];
@@ -72,7 +74,7 @@ class GoogleDriveService
             'client_id' => $credentials['client_id'],
             'redirect_uri' => $this->oauthRedirectUri(),
             'response_type' => 'code',
-            'scope' => 'openid email https://www.googleapis.com/auth/drive.file',
+            'scope' => self::DRIVE_FILE_SCOPE,
             'access_type' => 'offline',
             'include_granted_scopes' => 'true',
             'prompt' => 'consent',
@@ -99,22 +101,21 @@ class GoogleDriveService
             throw new \RuntimeException('Google no entrego acceso permanente. Vuelve a autorizar la cuenta.');
         }
 
+        $grantedScopes = preg_split('/\s+/', trim((string) ($tokens['scope'] ?? ''))) ?: [];
+        if ($grantedScopes !== [] && ! in_array(self::DRIVE_FILE_SCOPE, $grantedScopes, true)) {
+            throw new \RuntimeException('Google no concedio el permiso drive.file. Agregalo en Acceso a datos y vuelve a conectar la cuenta.');
+        }
+
         $accessToken = $tokens['access_token'];
-        $profile = Http::acceptJson()
-            ->withToken($accessToken)
-            ->timeout(30)
-            ->get('https://openidconnect.googleapis.com/v1/userinfo')
-            ->throw()
-            ->json();
         $folder = $this->ensureOAuthFolder($accessToken);
 
         $this->settings->put('google_drive_oauth_refresh_token', $tokens['refresh_token'], true);
         $this->settings->put('google_drive_oauth_folder_id', $folder['id']);
-        $this->settings->put('google_drive_oauth_email', $profile['email'] ?? null);
+        $this->settings->put('google_drive_oauth_email', null);
         $this->settings->put('google_drive_auth_mode', DeveloperSettingsService::AUTH_OAUTH);
 
         return [
-            'account' => $profile['email'] ?? null,
+            'account' => 'Mi unidad',
             'folder_name' => $folder['name'] ?? 'melodia-backups',
         ];
     }

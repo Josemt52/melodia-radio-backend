@@ -50,7 +50,7 @@ class DeveloperSettingsService
             'service_account_email' => $serviceDecoded['client_email'] ?? null,
             'oauth_credentials_configured' => isset($oauthDecoded['web']['client_id']),
             'oauth_connected' => $oauthConnected,
-            'oauth_account' => $this->get('google_drive_oauth_email'),
+            'oauth_account' => $oauthConnected ? ($this->get('google_drive_oauth_email') ?: 'Mi unidad') : null,
             'oauth_redirect_uri' => route('developer.drive.oauth.callback'),
             'oauth_connect_url' => isset($oauthDecoded['web']['client_id'])
                 ? route('developer.drive.oauth.redirect')

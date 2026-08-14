@@ -52,7 +52,7 @@ class GoogleDriveServiceTest extends TestCase
         $this->assertSame('offline', $query['access_type']);
         $this->assertSame('consent', $query['prompt']);
         $this->assertSame('secure-state', $query['state']);
-        $this->assertStringContainsString('drive.file', $query['scope']);
+        $this->assertSame('https://www.googleapis.com/auth/drive.file', $query['scope']);
         $this->assertSame(route('developer.drive.oauth.callback'), $query['redirect_uri']);
     }
 
@@ -62,9 +62,7 @@ class GoogleDriveServiceTest extends TestCase
             'https://oauth2.googleapis.com/token' => Http::response([
                 'access_token' => 'access-token',
                 'refresh_token' => 'refresh-token',
-            ]),
-            'https://openidconnect.googleapis.com/v1/userinfo' => Http::response([
-                'email' => 'owner@example.com',
+                'scope' => 'https://www.googleapis.com/auth/drive.file',
             ]),
             'https://www.googleapis.com/drive/v3/files*' => Http::response([
                 'id' => 'folder-id',
@@ -83,15 +81,40 @@ class GoogleDriveServiceTest extends TestCase
         $settings->shouldReceive('get')->with('google_drive_oauth_folder_id')->once()->andReturn(null);
         $settings->shouldReceive('put')->with('google_drive_oauth_refresh_token', 'refresh-token', true)->once();
         $settings->shouldReceive('put')->with('google_drive_oauth_folder_id', 'folder-id')->once();
-        $settings->shouldReceive('put')->with('google_drive_oauth_email', 'owner@example.com')->once();
+        $settings->shouldReceive('put')->with('google_drive_oauth_email', null)->once();
         $settings->shouldReceive('put')->with('google_drive_auth_mode', DeveloperSettingsService::AUTH_OAUTH)->once();
 
         $result = (new GoogleDriveService($settings))->connectOAuth('authorization-code');
 
-        $this->assertSame('owner@example.com', $result['account']);
+        $this->assertSame('Mi unidad', $result['account']);
         $this->assertSame('melodia-backups', $result['folder_name']);
         Http::assertSent(fn ($request) => $request->url() === 'https://www.googleapis.com/drive/v3/files?fields=id,name'
             && $request['parents'] === ['root']);
+    }
+
+    public function test_it_rejects_an_oauth_token_without_drive_file_scope(): void
+    {
+        Http::fake([
+            'https://oauth2.googleapis.com/token' => Http::response([
+                'access_token' => 'access-token',
+                'refresh_token' => 'refresh-token',
+                'scope' => 'openid email',
+            ]),
+        ]);
+
+        $settings = Mockery::mock(DeveloperSettingsService::class);
+        $settings->shouldReceive('get')->with('google_drive_oauth_credentials')->once()->andReturn(json_encode([
+            'web' => [
+                'client_id' => 'client-id',
+                'client_secret' => 'client-secret',
+                'token_uri' => 'https://oauth2.googleapis.com/token',
+            ],
+        ]));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google no concedio el permiso drive.file.');
+
+        (new GoogleDriveService($settings))->connectOAuth('authorization-code');
     }
 
     public function test_it_refreshes_oauth_access_when_testing_the_drive_connection(): void
